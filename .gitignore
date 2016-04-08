@@ -1,5 +1,12 @@
-data/*
-logs_dir/*
-orthodb_groups_fasta/*
-share/*
-cluster_alignments/*
+data/universal.singlecopy0.9.fasta
+logs/*
+orthodb_groups_fasta/
+cluster_alignments/
+lib/paml_bin
+lib/paml4.9a/
+lib/mafft_bin
+lib/mafft-7.273-without-extensions/
+share/
+paml_configs/
+paml_trees/
+nh_groups_fasta/

@@ -22,20 +22,34 @@ The python modules can be installed via pip and the included requirements.txt.
 You can use your own installation of each of these software packages, but we suggest using the included packages.
 Follow these steps to install all software.
 
+### Compiling PAML
+For this application, we require the PAML evolverRandomTree package.
+This is not built in the default PAML software package.
+The version of PAML that is included in this software package contains the modifications as outlined in the [PAML documentation](http://www.molecularevolution.org/molevolfiles/paml/pamlDOC.pdf) necessary to compile the evolverRandomTree binary.
+It also contains modifications that allow the evolverRandomTree program to save output to a user-specified destination.
+It is suggested that you use the included PAML distribution in this package unless you are able to make the necessary modifications to your PAML installation.
+
+## Installation
+
 ```bash
-# Install python dependencies (with root permissions)
+# Python dependenecies
+## With root permissions
 pip install -r requirements.txt
 
-# Install python dependenceis (without root permissions)
+## Without root permissions
 pip install --user -r requirements.txt
 
 # Install Aliscore
+make aliscore
 
 # Install MAFFT
+make mafft
 
 # Install PAML
+make paml
 
 # Install Seq-Gen
+make seq-gen
 ```
 
 ## Tutorial
@@ -57,7 +71,44 @@ wget "http://orthodb.org/fasta?query=&level=6656&species=6656&universal=1&single
 bin/train_model.py
 ```
 
+
 2. Filtering using a trained model
+
+```bash
+run this commmand
+```
+
+You now have a filtered set of orthology clusters!
+
+### Notes on running the program:
+
+The train_model.py script is all-inclusive and will do everything for you.
+There are flags provided to skip steps in the pipeline.
+These flags are listed in the order that they are evaluated in the pipeline.
+If you skip a step all previous steps will be skipped as well.
+Each flag requires you to pass in a path to the directory containing the expected output from all previous steps.
+The skip flags are:
+
+```
+  --skip_segregate SKIP_SEGREGATE
+                        Skip segregating the fasta file from OrthoDB into
+                        separate fasta files for each group. Provide the path
+                        to the directory that contains all the segregated
+                        ortho groups in fasta format.
+  --skip_align_orthodb SKIP_ALIGN_ORTHODB
+                        Skip alignment process for each OrthoDB orthology
+                        group. Provide the path to the directory with the
+                        OrthBD alignments in fasta format.
+  --skip_generate_nh SKIP_GENERATE_NH
+                        Skip the generation process of false-positive homology
+                        clusters. Provide the path to the directory with all
+                        false-positive homology clusters in fasta format.
+  --skip_align_nh SKIP_ALIGN_NH
+                        Skip the alignment process for each false-positive
+                        homoloy clusters. Provide the path to the directory
+                        with all fasle-positive homology cluster alignments in
+                        fasta format.
+```
 
 ## Citing this package
 
@@ -82,3 +133,4 @@ The authors would like to thank:
 
 1. BYU Computational Sciences Laboratory
 1. Christophe Giraud-Carrier
+1. Quinn Snell
