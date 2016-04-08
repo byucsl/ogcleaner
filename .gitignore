@@ -1,1 +1,5 @@
 data/*
+logs_dir/*
+orthodb_groups_fasta/*
+share/*
+cluster_alignments/*
