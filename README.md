@@ -2,14 +2,41 @@
 
 ## Purpose
 
+This software package is designed as an all-inclusive source for taking putative orthology clusters and filtering them.
+
 ## Methodology
 
-## Installation/Required software
+Our methodology is based on a machine-learning approach published in BMC Bioinformatics 
 
-1. python
+## Required software
+
+1. python 2
 1. scikit-learn
-1. aliscore
-1. mafft
+1. [Aliscore](https://www.zfmk.de/en/research/research-centres-and-groups/aliscore)
+1. [MAFFT](http://mafft.cbrc.jp/alignment/software/)
+1. [PAML](http://abacus.gene.ucl.ac.uk/software/paml.html)
+1. [Seq-Gen](http://tree.bio.ed.ac.uk/software/seqgen/)
+
+Note: all necessary software packages (aside from the python modules) are included.
+The python modules can be installed via pip and the included requirements.txt.
+You can use your own installation of each of these software packages, but we suggest using the included packages.
+Follow these steps to install all software.
+
+```bash
+# Install python dependencies (with root permissions)
+pip install -r requirements.txt
+
+# Install python dependenceis (without root permissions)
+pip install --user -r requirements.txt
+
+# Install Aliscore
+
+# Install MAFFT
+
+# Install PAML
+
+# Install Seq-Gen
+```
 
 ## Tutorial
 
@@ -30,8 +57,28 @@ wget "http://orthodb.org/fasta?query=&level=6656&species=6656&universal=1&single
 bin/train_model.py
 ```
 
-1. Filtering using a trained model
+2. Filtering using a trained model
 
 ## Citing this package
 
+Please use the following to cite us:
+
+```tex
+@article{fujimoto2016detecting,
+  title={Detecting false positive sequence homology: a machine learning approach},
+  author={Fujimoto, M Stanley and Suvorov, Anton and Jensen, Nicholas O and Clement, Mark J and Bybee, Seth M},
+  journal={BMC bioinformatics},
+  volume={17},
+  number={1},
+  pages={1},
+  year={2016},
+  publisher={BioMed Central}
+}
+```
+
 ## Acknowledgements
+
+The authors would like to thank:
+
+1. BYU Computational Sciences Laboratory
+1. Christophe Giraud-Carrier
