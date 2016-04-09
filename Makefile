@@ -1,14 +1,31 @@
 all: mafft paml aliscore seq-gen
 	@echo "Compiled all software dependencies!"
 
-mafft:
+mafft: lib/mafft_bin/mafft
+
+lib/mafft_bin/mafft:
+	if [ -f lib/mafft_bin ]; \
+		then \
+			rm lib/mafft/bin; \
+		fi;
+
 	@echo "Compiling MAFFT"
+	cd lib; \
+		tar zxvf mafft-7.273-without-extensions-src.tgz; \
+		cd mafft-7.273-without-extensions/core; \
+		$(MAKE) install; \
+		cd ../..; \
+		ln -s mafft-7.273-without-extensions/core/bin mafft_bin
 	@echo "Done!"
 
 paml: lib/paml_bin/evolverRandomTree
 	
 lib/paml_bin/evolverRandomTree:
-	rm lib/paml_bin
+	if[ -f lib/paml_bin ]; \
+		then \
+			rm lib/paml_bin; \
+		fi;
+
 	@echo "Compiling PAML"
 	cd lib; \
 		tar zxvf paml4.9a.tgz; \
@@ -26,6 +43,11 @@ aliscore:
 seq-gen: lib/seq-gen_bin/seq-gen
 	
 lib/seq-gen_bin/seq-gen:
+	if[ -f lib/seq-gen_bin ]; \
+		then \
+			rm lib/seq-gen_bin; \
+		fi;
+
 	@echo "Compling Seq-Gen"
 	cd lib; \
 		tar zxvf Seq-Gen.v1.3.3.tgz; \

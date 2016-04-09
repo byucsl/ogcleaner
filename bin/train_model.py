@@ -16,8 +16,8 @@ default_seqgen_path = str( base_path ) + "/lib/seq-gen_bin/seq-gen"
 default_seqgen_opts = "-mWAG -k1 -i0 -n1"
 
 # TODO: enumerate all possible models and features
-available_models = "svm"
-available_features = "length"
+available_models = "svm,neural_network,random_forest,naive_bayes,logistic_regression"
+available_features = "aliscore,length,num_seqs,num_gaps,num_amino_acids,range,amino_acid_charged,amino_acid_uncharged,amino_acid_special,amino_acid_hydrophobic"
 
 
 def init_child(lock_):
@@ -410,6 +410,14 @@ def generate_nh_clusters( orthodb_group_paths, evolved_seqs_dir, nh_groups_dir, 
     return evolved_cluster_paths
 
 
+def featurized_cluster( item ):
+    pass
+
+
+def featurize_clusters( cluster_paths ):
+    pass
+
+
 def errw( text ):
     sys.stderr.write( text )
 
@@ -445,6 +453,7 @@ def main( args ):
     dir_check( args.aligned_nh_dir )
     dir_check( args.paml_trees_dir )
     dir_check( args.evolved_seqs_dir )
+    dir_check( args.featurized_clusters_dir )
 
     ortho_groups = segregate_orthodb_groups( args.orthodb_fasta, args.orthodb_groups_dir )
 
@@ -550,6 +559,11 @@ if __name__ == "__main__":
             default = "evolved_seqs",
             help = "Directory to store evolved sequences."
             )
+    group_dir.add_argument( "--featurized_clusters_dir",
+            type = str,
+            default = "featured_clusters",
+            help = "Directory to store the matrix of featurized clusters. 2 files will be placed in this directory: 1 for the OrthoDB clusters and 1 for the non-homology clusters."
+            )
     group_aligner = parser.add_argument_group( "Aligner options", "Options to use for aligning your sequence clusters." )
     group_aligner.add_argument( "--aligner_path",
             type = str,
@@ -581,11 +595,13 @@ if __name__ == "__main__":
     group_model = parser.add_argument_group( "Model training", "Models and features available for training" )
     group_model.add_argument( "--models",
             type = str,
-            help = "A comma separated list of models to use. Available models include: " + available_models + "."
+            default = available_models,
+            help = "A comma separated list of models to use. Available models include: " + ", ".join( available_models.split( ',' ) ) + ". If more than one model is selected, a meta-classifier is used that combined all specified models."
             )
     group_model.add_argument( "--features",
             type = str,
-            help  = "A comma separted list of features to use when training models. Available features include: " + available_features + "."
+            default = available_features,
+            help  = "A comma separted list of features to use when training models. Available features include: " + ", ".join( available_features.split( ',' ) ) + "."
             )
     group_misc = parser.add_argument_group( "Misc.", "Extra options you can set when you're running the program." )
     group_misc.add_argument( "--threads",

@@ -6,7 +6,7 @@ This software package is designed as an all-inclusive source for taking putative
 
 ## Methodology
 
-Our methodology is based on a machine-learning approach published in BMC Bioinformatics 
+Our methodology is based outlined in [**Detecting false positive sequence homology: a machine learning approach**](http://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-016-0955-3) published in BMC Bioinformatics on 24 February 2016.
 
 ## Required software
 
@@ -21,6 +21,11 @@ Note: all necessary software packages (aside from the python modules) are includ
 The python modules can be installed via pip and the included requirements.txt.
 You can use your own installation of each of these software packages, but we suggest using the included packages.
 Follow these steps to install all software.
+
+### Compiling MAFFT
+We include a modified version of MAFFT that is altered for installation without root permissions.
+No other modifications were made to it, feel free to use your own MAFFT installation if you already have it by using the ```--aligner_path``` option.
+We suggest using the included MAFFT package.
 
 ### Compiling PAML
 For this application, we require the PAML evolverRandomTree package.
