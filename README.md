@@ -61,20 +61,20 @@ make seq-gen
 # This can be done via the OrthoDB website, or you can use wget if you know how to query their APIs
 wget "http://orthodb.org/fasta?query=&level=6656&species=6656&universal=1&singlecopy=0.9"
 
-# Run the model training script
+# Run the model training script on the included test dataset (a very small subset of OrthoDB data)
 # This script will take care of everything for you after you have a dataset from OrthoDB, includeing:
 #   1. Parsing the sequences into their OrthoDB Groups
 #   2. Generate false-positive homology clusters from the true-positive homology clusters
 #   3. Align the clusters using MAFFT
 #   4. Featurize the clusters
 #   5. Train a filtering model
-bin/train_model.py
+python bin/train_model.py --orthodb_fasta data/small.fasta
 ```
-
 
 2. Filtering using a trained model
 
 ```bash
+# This will use the trained model in created in the previous step.
 run this commmand
 ```
 

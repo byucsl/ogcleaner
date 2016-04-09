@@ -25,6 +25,12 @@ def init_child(lock_):
     lock = lock_
 
 
+def init_child_cluster_seqs( lock_, nh_groups_dir_ ):
+    global lock, nh_groups_dir
+    lock = lock_
+    nh_groups_dir = nh_groups_dir_
+
+
 def init_child_tree_builder( lock_, config_file_paths_, paml_path_, logs_dir_, paml_trees_dir_ ):
     global lock, config_file_paths, paml_path, logs_dir, paml_trees_dir
     lock = lock_
@@ -34,13 +40,15 @@ def init_child_tree_builder( lock_, config_file_paths_, paml_path_, logs_dir_, p
     paml_trees_dir = paml_trees_dir_
 
 
-def init_child_cluster_gen( lock_, trees_, nh_groups_dir_, seqgen_path_, seqgen_opts_ ):
-    global lock, trees, nh_groups_dir, seqgen_path, seqgen_opts
+def init_child_cluster_gen( lock_, trees_, nh_groups_dir_, seqgen_path_, seqgen_opts_, logs_dir_, evolved_seqs_dir_ ):
+    global lock, trees, nh_groups_dir, seqgen_path, seqgen_opts, logs_dir, evolved_seqs_dir
     lock = lock_
     trees = trees_
     nh_groups_dir = nh_groups_dir_
     seqgen_path = seqgen_path_
     seqgen_opts = seqgen_opts_
+    logs_dir = logs_dir_
+    evolved_seqs_dir = evolved_seqs_dir_
 
 
 def remove_ambiguous_amino_acids( seq ):
@@ -176,8 +184,16 @@ def generate_paml_tree( item ):
     id = item[ 0 ]
     config_path = item[ 1 ]
     output_path = paml_trees_dir + "/" + str( id )
-    log_out = logs_dir + "/" + str( id )
+    log_out = logs_dir + "/" + str( id ) + ".paml"
     with open( log_out, 'w' ) as log_fh:
+        status = call( [ paml_path, '5', config_path, output_path ], stdout = log_fh )
+        tries = 0
+        # It looks like PAML's exit codes aren't correct... we'll ignore them for now
+        #while status != 0 or tries < 2:
+            #with lock:
+            #    errw( "\t\t\tTree " + config_path + " generation failed... trying again\n" )
+            #status = call( [ paml_path, '5', config_path, output_path ], stdout = log_fh )
+            #tries += 1
         status = call( [ paml_path, '5', config_path, output_path ], stdout = log_fh )
 
         with lock:
@@ -215,7 +231,8 @@ def generate_paml_trees( paml_trees_dir, config_file_paths, threads, paml_path, 
 
     errw( "\t\tDone constructing trees!\n" )
 
-    return [ ( x[ 0 ], paml_trees_dir + "/" + str( x[ 0 ] ) ) for x in tasks ]
+    return [ ( x[ 0 ], paml_trees_dir + "/" + str( x[ 0 ] ) ) for x in tasks if os.path.isfile( paml_trees_dir + "/" + str( x[ 0 ] ) ) ]
+
 
 def merge_all_trees( tree_file_paths ):
 
@@ -229,72 +246,69 @@ def merge_all_trees( tree_file_paths ):
 
 
 def evolve_seq( id, output_dir, header, seq, tree ):
-    seqgen_input = "\t1\t" + str( len( seq ) ) + "\n" + header + "\n" + seq + "\n1\n" + tree + "\n"
-    #print seqgen_input
+    seq_id = header[ 1 : ].split()[ 0 ].split( ':' )[ 1 ]
+    seqgen_input = "1\t" + str( len( seq ) ) + "\n" + seq_id + "\t" + seq + "\n1\n" + tree
+    #print seqgen_input + "\n"
+    id = id.split()[ 0 ]
+    output_path = output_dir + "/" + id + "/" + seq_id + ".evolved"
 
-    try:
-        with open( output_dir + "/" + id, 'a' ) as fh:
-            p = Popen( [ seqgen_path, seqgen_opts ], stdout = fh, stdin = PIPE, stderr = PIPE )
-            fh.write( "\n" )
+    with open( output_path, 'w' ) as fh, open( logs_dir + "/" + id + "." + seq_id + ".seqgen_out", 'w' ) as stderr_out:
+        p = Popen( [ default_seqgen_path ] + seqgen_opts, stdout = fh, stdin = PIPE, stderr = stderr_out )
+        #fh.write( "\n" )
         p.communicate( input = seqgen_input )
-    except OSError:
-        print "can't open " + id
+        p.wait()
 
 
-def generate_evolved_cluster( item ):
+def generate_evolved_sequence( item ):
     id = item[ 0 ]
     cluster_path = item[ 1 ]
     new_cluster = []
 
+    dir_check( evolved_seqs_dir + "/" + id )
+
     headers = []
     seqs = []
 
-    print cluster_path
+    with open( cluster_path, 'r' ) as fh:
+        header = ""
+        seq = ""
+        for line in fh:
+            if line[ 0 ] == ">":
+                if header != "":
+                    # evolve individual sequence
+                    #evolved_seq = evolve_seq( id, nh_groups_dir, header, seq, tree )
+                    #new_cluster.append( ( header, evolved_seq ) )
 
-    try:
-        with open( cluster_path, 'r' ) as fh:
-            header = ""
-            seq = ""
-            for line in fh:
-                if line[ 0 ] == ">":
-                    if header != "":
-                        # evolve individual sequence
-                        #evolved_seq = evolve_seq( id, nh_groups_dir, header, seq, tree )
-                        #new_cluster.append( ( header, evolved_seq ) )
+                    headers.append( header )
+                    seqs.append( seq )
 
-                        headers.append( header )
-                        seqs.append( seq )
+                # reset the sequence
+                header = line.strip()
+                seq = ""
+            else:
+                seq += line.strip()
+        #evolved_seq = evolve_seq( id, nh_gruop_dir, header, seq, tree )
+        #new_cluster.append( ( header, evolved_seq ) )
 
-                    # reset the sequence
-                    header = line.strip()
-                    seq = ""
-                else:
-                    seq += line.strip()
-            #evolved_seq = evolve_seq( id, nh_gruop_dir, header, seq, tree )
-            #new_cluster.append( ( header, evolved_seq ) )
-
-            headers.append( header )
-            seqs.append( seq )
-    except OSError:
-        print "error!\t" + cluster_path
-
-    print "done"
+        headers.append( header )
+        seqs.append( seq )
 
     tree_indices = np.random.randint( len( trees ), size = len( seqs ) )
     for idx, full_seq in enumerate( zip( headers, seqs ) ):
         header = full_seq[ 0 ]
         seq = full_seq[ 1 ]
-        evolve_seq( id, nh_groups_dir, header, seq, trees[ tree_indices[ idx ] ] )
+        evolve_seq( id, evolved_seqs_dir, header, seq, trees[ tree_indices[ idx ] ] )
 
     with lock:
         errw( "\t\t\tEvolved cluster " + id + "\n" )
 
-def generate_evolved_clusters( nh_groups_dir, all_trees, homology_cluster_paths, threads, seqgen_path, seqgen_opts ):
+def generate_evolved_sequences( nh_groups_dir, all_trees, homology_cluster_paths, threads, seqgen_path, seqgen_opts, logs_dir, evolved_seqs_dir ):
     errw( "\t\tGenerating evolved sequences...\n" )
 
     # prep tasks
     #tasks = [ x for x in homology_cluster_paths ]
     tasks = homology_cluster_paths
+    #print homology_cluster_paths
 
     # distribute tasks
     lock = Lock()
@@ -306,19 +320,63 @@ def generate_evolved_clusters( nh_groups_dir, all_trees, homology_cluster_paths,
                 all_trees,
                 nh_groups_dir,
                 seqgen_path,
-                seqgen_opts
+                seqgen_opts,
+                logs_dir,
+                evolved_seqs_dir
                 )
             )
-    pool.map( generate_evolved_cluster, tasks )
+    pool.map( generate_evolved_sequence, tasks )
     pool.close()
     pool.join()
 
     errw( "\t\tDone generating evolved sequences!\n" )
 
-    return [ ( x[ 0 ], nh_groups_dir + "/" + x[ 0 ] ) for x in homology_cluster_paths ]
+    return [ ( x[ 0 ], evolved_seqs_dir + "/" + x[ 0 ] ) for x in homology_cluster_paths ]
 
 
-def generate_nh_clusters( orthodb_group_paths, nh_groups_dir, paml_configs_dir, paml_trees_dir, threads, paml_path, logs_dir, seqgen_path, seqgen_opts ):
+def create_evolved_cluster( item ):
+    group_id = item[ 0 ]
+    dir_path = item[ 1 ]
+    cluster_seqs = []
+
+    for dirname, dirnames, filenames in os.walk( dir_path ):
+        for filename in filenames:
+            full_path = os.path.join( dirname, filename )
+            with open( full_path ) as fh:
+                spec_seqs = []
+                species_name = filename[ : filename.rfind( '.' ) ]
+                fh.next()
+                for line in fh:
+                    spec_seqs.append( line.strip().split()[ 1 ] )
+                rand_seq = spec_seqs[ np.random.randint( len( spec_seqs ) - 1 ) ]
+                cluster_seqs.append( ( species_name, rand_seq ) )
+
+    with open( nh_groups_dir + "/" + group_id, 'w' ) as fh:
+        for header, seq in cluster_seqs:
+            fh.write( ">" + header + "\n" + seq + "\n" )
+
+
+def create_evolved_clusters( evolved_cluster_dir_paths, threads, nh_groups_dir ):
+    errw( "\t\tForming clusters of evolved sequences...\n" )
+    lock = Lock()
+    pool = Pool(
+            threads,
+            initializer = init_child_cluster_seqs,
+            initargs = (
+                lock,
+                nh_groups_dir
+                )
+            )
+    pool.map( create_evolved_cluster, evolved_cluster_dir_paths )
+    pool.close()
+    pool.join()
+    
+    errw( "\t\tDone forming clusters!\n" )
+    
+    return [ x[ 0 ] for x in evolved_cluster_dir_paths ]
+
+
+def generate_nh_clusters( orthodb_group_paths, evolved_seqs_dir, nh_groups_dir, paml_configs_dir, paml_trees_dir, threads, paml_path, logs_dir, seqgen_path, seqgen_opts ):
     errw( "\tGenerating false-positive homology clusters...\n" )
     # generate paml config files
     config_file_paths = generate_paml_configs( paml_configs_dir )
@@ -330,9 +388,26 @@ def generate_nh_clusters( orthodb_group_paths, nh_groups_dir, paml_configs_dir, 
     all_trees = merge_all_trees( tree_file_paths )
 
     # evolve sequences
-    evolved_seq_paths = generate_evolved_clusters( nh_groups_dir, all_trees, orthodb_group_paths, threads, seqgen_path, seqgen_opts )
+    evolved_cluster_dir_paths = generate_evolved_sequences(
+            nh_groups_dir,
+            all_trees,
+            orthodb_group_paths,
+            threads,
+            seqgen_path,
+            seqgen_opts,
+            logs_dir,
+            evolved_seqs_dir )
+
+    # form clusters
+    evolved_cluster_paths = create_evolved_clusters(
+            evolved_cluster_dir_paths,
+            threads,
+            nh_groups_dir
+            )
 
     errw( "\tDone generating false-positive homology clusters!\n" )
+
+    return evolved_cluster_paths
 
 
 def errw( text ):
@@ -344,7 +419,7 @@ def dir_check( dir_path ):
         status = call( [ "mkdir", dir_path ] )
 
         if status == 0:
-            errw( "Created orthogroup fasta folder " + dir_path + "\n" )
+            errw( "Created directory " + dir_path + "\n" )
         else:
             sys.exit( "ERROR! Could not create the directory " + dir_path + ". Aborting!" )
 
@@ -366,8 +441,10 @@ def main( args ):
     dir_check( args.nh_groups_dir )
     dir_check( args.paml_configs_dir )
     dir_check( args.logs_dir )
-    dir_check( args.aligned_dir )
+    dir_check( args.aligned_homology_dir )
+    dir_check( args.aligned_nh_dir )
     dir_check( args.paml_trees_dir )
+    dir_check( args.evolved_seqs_dir )
 
     ortho_groups = segregate_orthodb_groups( args.orthodb_fasta, args.orthodb_groups_dir )
 
@@ -377,15 +454,19 @@ def main( args ):
             args.aligner_options,
             args.orthodb_groups_dir,
             ortho_groups,
-            args.aligned_dir,
+            args.aligned_homology_dir,
             args.threads,
             args.logs_dir
             )
 
+    # process the seqgen_opts
+    args.seqgen_opts = args.seqgen_opts.split()
+
     # non-homology cluster generation
-    ortho_group_paths = [ ( x, args.orthodb_groups_dir + "/" + x ) for x in ortho_groups ]
-    ortho_groups = generate_nh_clusters(
-            ortho_group_paths,
+    nh_group_paths = [ ( x, args.orthodb_groups_dir + "/" + x ) for x in ortho_groups ]
+    nh_groups = generate_nh_clusters(
+            nh_group_paths,
+            args.evolved_seqs_dir,
             args.nh_groups_dir,
             args.paml_configs_dir,
             args.paml_trees_dir,
@@ -398,11 +479,21 @@ def main( args ):
 
     # align the non-homology clusters
     ## need the paths to each cluaster
-    align_clusters( args.nh_groups_dir, nh_groups )
+    align_clusters(
+            args.aligner_path,
+            args.aligner_options,
+            args.nh_groups_dir,
+            nh_groups,
+            args.aligned_nh_dir,
+            args.threads,
+            args.logs_dir
+            )
 
     # featurize datasets
 
     # train models
+
+    # perform model tests
 
     errw( "Finished!\n" )
 
@@ -439,15 +530,25 @@ if __name__ == "__main__":
             default = "logs",
             help = "Directory to store progress output from programs."
             )
-    group_dir.add_argument( "--aligned_dir",
+    group_dir.add_argument( "--aligned_homology_dir",
             type = str,
-            default = "cluster_alignments",
-            help = "Directory to store all alignments."
+            default = "cluster_alignments_homology",
+            help = "Directory to store all OrthoDB homology alignments."
+            )
+    group_dir.add_argument( "--aligned_nh_dir",
+            type = str,
+            default = "cluster_alignments_nh",
+            help = "Directory to store all false-positive homology alignments."
             )
     group_dir.add_argument( "--paml_trees_dir",
             type = str,
             default = "paml_trees",
             help = "Directory to store trees generated from PAML."
+            )
+    group_dir.add_argument( "--evolved_seqs_dir",
+            type = str,
+            default = "evolved_seqs",
+            help = "Directory to store evolved sequences."
             )
     group_aligner = parser.add_argument_group( "Aligner options", "Options to use for aligning your sequence clusters." )
     group_aligner.add_argument( "--aligner_path",
@@ -475,7 +576,7 @@ if __name__ == "__main__":
     group_seqgen.add_argument( "--seqgen_opts",
             type = str,
             default = default_seqgen_opts,
-            help = "Options for running Seq-gen."
+            help = "Options for running Seq-Gen."
             )
     group_model = parser.add_argument_group( "Model training", "Models and features available for training" )
     group_model.add_argument( "--models",

@@ -10,3 +10,9 @@ share/
 paml_configs/
 paml_trees/
 nh_groups_fasta/
+mc.paml
+siterates.txt
+evolver.out
+evolved_seqs/
+cluster_alignments_nh/
+cluster_alignments_homology/
