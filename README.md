@@ -59,11 +59,11 @@ make seq-gen
 
 ## Tutorial
 
-1. Training a filtering model
+### Training a filtering model
 
 ```bash
 # Get a dataset from OrthoDB.
-# This can be done via the OrthoDB website, or you can use wget if you know how to query their APIs
+# This can be done via the OrthoDB website, or you can use wget if you want to query their APIs directly
 wget "http://orthodb.org/fasta?query=&level=6656&species=6656&universal=1&singlecopy=0.9"
 
 # Run the model training script on the included test dataset (a very small subset of OrthoDB data)
@@ -75,8 +75,12 @@ wget "http://orthodb.org/fasta?query=&level=6656&species=6656&universal=1&single
 #   5. Train a filtering model
 python bin/train_model.py --orthodb_fasta data/small.fasta
 ```
+This script will train a model for you and save the model to disk to be used in the following script.
+It also generates lots of intermediary files that can be removed if you do not wish to keep them.
+Use the ```make rm_int``` command to remove all intermediary files but still retain the trained models.
+Note that this command only removes the default folders, if you specify your own folders during runtime they must be manually deleted.
 
-2. Filtering using a trained model
+### Filtering using a trained model
 
 ```bash
 # This will use the trained model in created in the previous step.

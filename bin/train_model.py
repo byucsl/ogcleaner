@@ -457,7 +457,7 @@ def main( args ):
 
     ortho_groups = segregate_orthodb_groups( args.orthodb_fasta, args.orthodb_groups_dir )
 
-    # align the ortho clusters
+    # align the orthodb clusters
     align_clusters(
             args.aligner_path,
             args.aligner_options,
@@ -487,7 +487,6 @@ def main( args ):
             )
 
     # align the non-homology clusters
-    ## need the paths to each cluaster
     align_clusters(
             args.aligner_path,
             args.aligner_options,
@@ -561,7 +560,7 @@ if __name__ == "__main__":
             )
     group_dir.add_argument( "--featurized_clusters_dir",
             type = str,
-            default = "featured_clusters",
+            default = "featurized_clusters",
             help = "Directory to store the matrix of featurized clusters. 2 files will be placed in this directory: 1 for the OrthoDB clusters and 1 for the non-homology clusters."
             )
     group_aligner = parser.add_argument_group( "Aligner options", "Options to use for aligning your sequence clusters." )
