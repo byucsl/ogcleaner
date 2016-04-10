@@ -13,6 +13,7 @@ max_rand_int = 100000
 default_mafft_path = str( base_path ) + "/lib/mafft_bin/mafft"
 default_paml_path = str( base_path ) + "/lib/paml_bin/evolverRandomTree"
 default_seqgen_path = str( base_path ) + "/lib/seq-gen_bin/seq-gen"
+default_aliscore_path = str( base_path ) + "/lib/Aliscore_v.2.0/Aliscore.02.2.pl"
 default_seqgen_opts = "-mWAG -k1 -i0 -n1"
 
 # TODO: enumerate all possible models and features
@@ -23,6 +24,12 @@ available_features = "aliscore,length,num_seqs,num_gaps,num_amino_acids,range,am
 def init_child(lock_):
     global lock
     lock = lock_
+
+
+def init_child_featurize( lock_, data_dest_ ):
+    global lock, data_dest
+    lock = lock_
+    data_set = data_set_
 
 
 def init_child_cluster_seqs( lock_, nh_groups_dir_ ):
@@ -411,11 +418,78 @@ def generate_nh_clusters( orthodb_group_paths, evolved_seqs_dir, nh_groups_dir, 
 
 
 def featurized_cluster( item ):
-    pass
+    idx = item[ 0 ]
+    group = item[ 1 ]
+    path = item[ 2 ]
+
+    # compute all features unless it's aliscore
+    length = 0
+    num_seqs = 0
+    num_gaps = 0
+    num_aa = 0
+    range = 0
+    aa_charged = 0
+    aa_uncharged = 0
+    aa_special = 0
+    aa_hydrophobic = 0
+
+    min_seq_len = float( 'infinity' )
+    max_seq_len = 0
+
+    with open( path, 'r' ) as fh:
+        for line in fh:
+            if line[ 0 ] == '>':
+                num_seqs += 1
+            else:
+                c_gaps = line.count( '-' )
+                seq_len = len( line.strip() ) - c_gaps
+
+                num_gaps += c_gaps
+                num_aa += seq_len
+
+                if seq_len > max_seq_len:
+                    max_seq_len = seq_len
+                if seq_len < min_seq_len:
+                    min_seq_len = seq_len
+
+                # count amino acid types
+                ## charged
+
+                ## uncharged
+
+                ## special
+
+                ## hydrophobic
+
+    range = max_seq_len - min_seq_len
+
+    # compute aliscore
+
+    with lock:
+        errw( "\t\t\tFeaturized " + group + "!\n" )
 
 
-def featurize_clusters( cluster_paths ):
-    pass
+def featurize_clusters( cluster_dir, cluster_ids, threads ):
+    errw( "\t\tFeaturizing clusters...\n" )
+    tasks = [ ( idx, x, cluster_dir + "/" + x ) for idx, x in enumerate( cluster_ids ) ]
+    featurized_clusters = [ 0 for x in cluster_ids ]
+    
+    lock = Lock()
+    pool = Pool(
+            threads,
+            initializer = init_child_featurize,
+            initargs = (
+                lock,
+                featurized_clusters
+                )
+            )
+    pool.map( featurize_cluster, tasks )
+    pool.close()
+    pool.join()
+
+    errw( "\t\tDone featurizing clusters!\n" )
+
+    return featureized_clusters
 
 
 def errw( text ):
@@ -498,6 +572,11 @@ def main( args ):
             )
 
     # featurize datasets
+    ## featurize orthodb groups
+    h_featurized = featurize_clusters( args.aligned_homology_dir, ortho_groups )
+
+    ## featurize nh groups
+    nh_featurized = featurize_clusters( args.aligned_nh_dir, nh_groups )
 
     # train models
 
@@ -590,6 +669,12 @@ if __name__ == "__main__":
             type = str,
             default = default_seqgen_opts,
             help = "Options for running Seq-Gen."
+            )
+    group_aliscore = parser.add_argument_group( "Aliscore options" )
+    group_aliscore.add_argument( "--aliscore_path",
+            type = str,
+            default = default_aliscore_path,
+            help = "Path to the aliscore binary."
             )
     group_model = parser.add_argument_group( "Model training", "Models and features available for training" )
     group_model.add_argument( "--models",

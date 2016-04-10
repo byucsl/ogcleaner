@@ -36,8 +36,13 @@ lib/paml_bin/evolverRandomTree:
 		ln -s paml4.9a/bin paml_bin
 	@echo "Done!"
 
-aliscore:
+aliscore: lib/aliscore_bin/Aliscore.02.2.pl
+
+lib/aliscore_bin/Aliscore.02.2.pl:
 	@echo "Compling Aliscore"
+	cd lib; \
+		unzip Aliscore_v.2.0.zip; \
+		ln -s Aliscore_v.2.0 aliscore_bin
 	@echo "Done!"
 
 seq-gen: lib/seq-gen_bin/seq-gen
