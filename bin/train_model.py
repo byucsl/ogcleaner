@@ -2,7 +2,7 @@ import sys, argparse, re, time, os
 import numpy as np
 from subprocess import call, Popen, PIPE
 from pathlib import Path
-from multiprocessing import Pool, Lock
+from multiprocessing import Pool, Lock, Queue
 
 
 # global variables
@@ -16,6 +16,43 @@ default_seqgen_path = str( base_path ) + "/lib/seq-gen_bin/seq-gen"
 default_aliscore_path = str( base_path ) + "/lib/Aliscore_v.2.0/Aliscore.02.2.pl"
 default_seqgen_opts = "-mWAG -k1 -i0 -n1"
 
+# amino acid properties
+# courtesy of Nick Jensen, thanks Nick!
+AAcodes = {
+        'W' : 4,
+        'I' : 4,
+        'E' : 1,
+        'S' : 2,
+        'D' : 1,
+        'P' : 3,
+        'Y' : 4,
+        'F' : 4,
+        'U' : 3,
+        'V' : 4,
+        'K' : 1,
+        'M' : 4,
+        'G' : 3,
+        'N' : 2,
+        'H' : 1,
+        'R' : 1,
+        'L' : 4,
+        'Q' : 2,
+        'T' : 2,
+        'C' : 3,
+        'A' : 4
+        }
+code_to_class = {
+        3 : 'AAspecial',
+        2 : 'AAuncharged_polar',
+        1 : 'AAcharged',
+        4 : 'AAhydrophobic'
+        }
+aa_special = [ 'P', 'U', 'G', 'C' ]
+aa_uncharged_polar = [ 'S', 'N', 'Q', 'T' ]
+aa_charged = [ 'E', 'D', 'K', 'H', 'R' ]
+aa_hydrophobic = [ 'W', 'I', 'Y', 'F', 'V', 'M', 'L', 'A' ]
+
+
 # TODO: enumerate all possible models and features
 available_models = "svm,neural_network,random_forest,naive_bayes,logistic_regression"
 available_features = "aliscore,length,num_seqs,num_gaps,num_amino_acids,range,amino_acid_charged,amino_acid_uncharged,amino_acid_special,amino_acid_hydrophobic"
@@ -26,10 +63,13 @@ def init_child(lock_):
     lock = lock_
 
 
-def init_child_featurize( lock_, data_dest_ ):
-    global lock, data_dest
+def init_child_featurize( lock_, data_dest_, working_dir_, label_, aliscore_path_ ):
+    global lock, data_dest, working_dir, label, aliscore_path
     lock = lock_
-    data_set = data_set_
+    data_dest = data_dest_
+    working_dir = working_dir_
+    label = label_
+    aliscore_path = aliscore_path_
 
 
 def init_child_cluster_seqs( lock_, nh_groups_dir_ ):
@@ -74,6 +114,7 @@ def generate_paml_config( seed, v ):
     "T   C   A   G" )
 
     return config_text.format( seed, int( v ) )
+
 
 def segregate_orthodb_groups( fasta_file_path, groups_dir ):
 
@@ -125,7 +166,7 @@ def segregate_orthodb_groups( fasta_file_path, groups_dir ):
                 out.write( item )
                 out.write( "\n" )
 
-        errw( "Done!\n" )
+        errw( " Done!\n" )
 
         return group_names
 
@@ -142,7 +183,8 @@ def align_cluster( aligner_path, aligner_opts, cluster_path, cluster_name, align
             if status != 0:
                 errw( "Alignment error!!\n" )
             else:
-                errw( "Done!\n" )
+                errw( " Done!\n" )
+
 
 def align_worker( item ):
     aligner_path = item[ 0 ]
@@ -152,6 +194,7 @@ def align_worker( item ):
     aligned_dir = item[ 4 ]
     logs_dir = item[ 5 ]
     align_cluster( aligner_path, aligner_opts, clusters_out_path, cluster_name, aligned_dir, logs_dir )
+
 
 def align_clusters( aligner_path, aligner_opts, clusters_dir, cluster_names, aligned_dir, threads, logs_dir ):
     errw( "\tAligning clusters...\n" )
@@ -183,7 +226,7 @@ def generate_paml_configs( outputs_dir ):
             fh.write( paml_config_text )
         file_paths.append( ( str( i ), file_path ) )
     
-    errw( "Done!\n" )
+    errw( " Done!\n" )
     return file_paths
 
 
@@ -193,7 +236,7 @@ def generate_paml_tree( item ):
     output_path = paml_trees_dir + "/" + str( id )
     log_out = logs_dir + "/" + str( id ) + ".paml"
     with open( log_out, 'w' ) as log_fh:
-        status = call( [ paml_path, '5', config_path, output_path ], stdout = log_fh )
+        status = call( [ paml_path, '5', config_path, output_path ], stdout = log_fh, stderr = log_fh )
         tries = 0
         # It looks like PAML's exit codes aren't correct... we'll ignore them for now
         #while status != 0 or tries < 2:
@@ -201,7 +244,7 @@ def generate_paml_tree( item ):
             #    errw( "\t\t\tTree " + config_path + " generation failed... trying again\n" )
             #status = call( [ paml_path, '5', config_path, output_path ], stdout = log_fh )
             #tries += 1
-        status = call( [ paml_path, '5', config_path, output_path ], stdout = log_fh )
+        status = call( [ paml_path, '5', config_path, output_path ], stdout = log_fh, stderr = log_fh )
 
         with lock:
             if status != 0:
@@ -215,7 +258,7 @@ def generate_paml_trees( paml_trees_dir, config_file_paths, threads, paml_path, 
     errw( "\t\tGenerating PAML tree construction task list..." )
     # generate a list of tasks
     tasks = config_file_paths
-    errw( "Done!\n" )
+    errw( " Done!\n" )
 
     errw( "\t\tConstructing trees...\n" )
 
@@ -308,6 +351,7 @@ def generate_evolved_sequence( item ):
 
     with lock:
         errw( "\t\t\tEvolved cluster " + id + "\n" )
+
 
 def generate_evolved_sequences( nh_groups_dir, all_trees, homology_cluster_paths, threads, seqgen_path, seqgen_opts, logs_dir, evolved_seqs_dir ):
     errw( "\t\tGenerating evolved sequences...\n" )
@@ -417,7 +461,7 @@ def generate_nh_clusters( orthodb_group_paths, evolved_seqs_dir, nh_groups_dir, 
     return evolved_cluster_paths
 
 
-def featurized_cluster( item ):
+def featurize_cluster( item ):
     idx = item[ 0 ]
     group = item[ 1 ]
     path = item[ 2 ]
@@ -428,59 +472,140 @@ def featurized_cluster( item ):
     num_gaps = 0
     num_aa = 0
     range = 0
-    aa_charged = 0
-    aa_uncharged = 0
-    aa_special = 0
-    aa_hydrophobic = 0
+    clust_aa_charged = []
+    clust_aa_uncharged = []
+    clust_aa_special = []
+    clust_aa_hydrophobic = []
 
     min_seq_len = float( 'infinity' )
     max_seq_len = 0
 
     with open( path, 'r' ) as fh:
-        for line in fh:
-            if line[ 0 ] == '>':
-                num_seqs += 1
-            else:
-                c_gaps = line.count( '-' )
-                seq_len = len( line.strip() ) - c_gaps
+        seq_aa_charged = 0
+        seq_aa_uncharged = 0
+        seq_aa_special = 0
+        seq_aa_hydrophobic = 0
+        seen_seq = False
 
-                num_gaps += c_gaps
-                num_aa += seq_len
+        # while counting up amino acids also prep cluster for aliscore
+        # headers for sequences must be formatted for aliscore to
+        # not throw an error
+        with open( working_dir + "/" + group, 'w' ) as ofh:
+            for line in fh:
+                if line[ 0 ] == '>':
+                    num_seqs += 1
 
-                if seq_len > max_seq_len:
-                    max_seq_len = seq_len
-                if seq_len < min_seq_len:
-                    min_seq_len = seq_len
+                    fixed_header = line.split()[ 0 ].replace( ':', '' ).replace( '(', '' ).replace( ')', '' ).replace( ';', '' ).replace( '|', '' ).replace( "--", '' ).replace( ',', '' ).replace( '*', '' )
+                    ofh.write( fixed_header + "\n" )
 
-                # count amino acid types
-                ## charged
+                    if seen_seq:
+                        clust_aa_charged.append( seq_aa_charged )
+                        clust_aa_uncharged.append( seq_aa_uncharged )
+                        clust_aa_special.append( seq_aa_special )
+                        clust_aa_hydrophobic.append( seq_aa_hydrophobic )
+                    seq_aa_charged = 0
+                    seq_aa_uncharged = 0
+                    seq_aa_special = 0
+                    seq_aa_hydrophobic = 0
+                    seen_seq = True
+                else:
+                    ofh.write( line )
 
-                ## uncharged
+                    c_gaps = line.count( '-' )
+                    seq_len = len( line.strip() ) - c_gaps
 
-                ## special
+                    num_gaps += c_gaps
+                    num_aa += seq_len
 
-                ## hydrophobic
+                    if seq_len > max_seq_len:
+                        max_seq_len = seq_len
+                    if seq_len < min_seq_len:
+                        min_seq_len = seq_len
 
+                    # aa_special = [ 'P', 'U', 'G', 'C' ]
+                    # aa_uncharged_polar = [ 'S', 'N', 'Q', 'T' ]
+                    # aa_charged = [ 'E', 'D', 'K', 'H', 'R' ]
+                    # aa_hydrophobic = [ 'W', 'I', 'Y', 'F', 'V', 'M', 'L', 'A' ]
+
+                    # count amino acid types
+                    ## charged
+                    seq_aa_charged += sum( line.count( x ) for x in aa_charged )
+
+                    ## uncharged
+                    seq_aa_uncharged += sum( line.count( x ) for x in aa_uncharged_polar )
+
+                    ## special
+                    seq_aa_special += sum( line.count( x ) for x in aa_special )
+
+                    ## hydrophobic
+                    seq_aa_hydrophobic += sum( line.count( x ) for x in aa_hydrophobic )
+            clust_aa_charged.append( seq_aa_charged )
+            clust_aa_uncharged.append( seq_aa_uncharged )
+            clust_aa_special.append( seq_aa_special )
+            clust_aa_hydrophobic.append( seq_aa_hydrophobic )
+
+    # calculate all actual values for the cluster
     range = max_seq_len - min_seq_len
 
+    # sanity checking, each of these should have something in them.
+    assert len( clust_aa_charged ) > 0
+    assert len( clust_aa_uncharged ) > 0
+    assert len( clust_aa_special ) > 0
+    assert len( clust_aa_hydrophobic ) > 0
+
+    clust_aa_charged = np.std( clust_aa_charged, ddof = 1 )
+    clust_aa_uncharged = np.std( clust_aa_uncharged, ddof = 1 )
+    clust_aa_special = np.std( clust_aa_special, ddof = 1 )
+    clust_aa_hydrophobic = np.std( clust_aa_hydrophobic, ddof = 1 )
+
     # compute aliscore
+    # perl Aliscore.02.2.pl -i 80.groupID8701.aln
+    aliscore_pm_path = os.path.dirname( aliscore_path )
+
+    with open( working_dir + "/" + group + ".aliscore.err", 'w' ) as err_fh, open( working_dir + "/" + group + ".aliscore.out", 'w' ) as out_fh:
+        status = call( [ "perl", "-I", aliscore_pm_path, aliscore_path, "-i", working_dir + "/" + group ], stdout = out_fh, stderr = err_fh )
+
+    if status != 0:
+        with lock:
+            errw( "\t\t\tAliscore failed :( ! Continuing...\n" )
+
+    # grab the aliscore from the output
+
+    aliscore = 0
+    if status == 0:
+        with open( working_dir + "/" + group + "_List_random.txt", 'r' ) as fh:
+            for line in fh:
+                line = line.strip()
+                if line == '':
+                    continue
+                aliscore += len( line.split() )
+
+    # store the featurized instance
+    #data_dest[ idx ] = [ aliscore, length, num_seqs, num_gaps, num_aa, range, clust_aa_charged, clust_aa_uncharged, clust_aa_special, clust_aa_hydrophobic, label ]
+    #data_dest.put( [ aliscore, length, num_seqs, num_gaps, num_aa, range, clust_aa_charged, clust_aa_uncharged, clust_aa_special, clust_aa_hydrophobic, label ] )
 
     with lock:
-        errw( "\t\t\tFeaturized " + group + "!\n" )
+        data_dest.append( [ aliscore, length, num_seqs, num_gaps, num_aa, range, clust_aa_charged, clust_aa_uncharged, clust_aa_special, clust_aa_hydrophobic, label ] )
+        errw( "\t\t\tFeaturizing of " + group + " Complete\n" )
 
 
-def featurize_clusters( cluster_dir, cluster_ids, threads ):
-    errw( "\t\tFeaturizing clusters...\n" )
+def featurize_clusters( cluster_dir, working_dir, cluster_ids, threads, label, aliscore_path ):
+    errw( "\t\tFeaturizing " + label + " clusters...\n" )
     tasks = [ ( idx, x, cluster_dir + "/" + x ) for idx, x in enumerate( cluster_ids ) ]
-    featurized_clusters = [ 0 for x in cluster_ids ]
-    
+    #featurized_clusters = [ 0 for x in cluster_ids ]
+    #featurized_clusters = Queue
+    featurized_clusters = []
+   
     lock = Lock()
     pool = Pool(
             threads,
             initializer = init_child_featurize,
             initargs = (
                 lock,
-                featurized_clusters
+                featurized_clusters,
+                working_dir,
+                label,
+                aliscore_path,
                 )
             )
     pool.map( featurize_cluster, tasks )
@@ -489,11 +614,22 @@ def featurize_clusters( cluster_dir, cluster_ids, threads ):
 
     errw( "\t\tDone featurizing clusters!\n" )
 
-    return featureized_clusters
+    return featurized_clusters
+
+
+def save_featurized_dataset( dest_path, data ):
+    errw( "\t\tSaving featurized data set to " + dest_path + "..." )
+    print data
+    with open( dest_path, 'w' ) as fh:
+        for item in data:
+            print item
+            fh.write( ", ".join( map( str, item ) ) + "\n" )
+    errw( " Done!\n" )
 
 
 def errw( text ):
     sys.stderr.write( text )
+
 
 def dir_check( dir_path ):
     # check if the output directory exists
@@ -528,6 +664,8 @@ def main( args ):
     dir_check( args.paml_trees_dir )
     dir_check( args.evolved_seqs_dir )
     dir_check( args.featurized_clusters_dir )
+    dir_check( args.aliscore_homology_dir )
+    dir_check( args.aliscore_nh_dir )
 
     ortho_groups = segregate_orthodb_groups( args.orthodb_fasta, args.orthodb_groups_dir )
 
@@ -573,14 +711,31 @@ def main( args ):
 
     # featurize datasets
     ## featurize orthodb groups
-    h_featurized = featurize_clusters( args.aligned_homology_dir, ortho_groups )
+    h_featurized = featurize_clusters(
+            args.aligned_homology_dir,
+            args.aliscore_homology_dir,
+            ortho_groups,
+            args.threads,
+            "H",
+            args.aliscore_path,
+            )
 
     ## featurize nh groups
-    nh_featurized = featurize_clusters( args.aligned_nh_dir, nh_groups )
+    nh_featurized = featurize_clusters(
+            args.aligned_nh_dir,
+            args.aliscore_nh_dir,
+            nh_groups, args.threads,
+            "NH",
+            args.aliscore_path,
+            )
+
+    ## concatenate the featurized tables into a single file and write to disk
+    save_featurized_dataset( args.featurized_clusters_dir + "/featurized_data.txt", h_featurized + nh_featurized )
 
     # train models
 
-    # perform model tests
+    # perform model tests for validation and performance analysis
+
 
     errw( "Finished!\n" )
 
@@ -641,6 +796,16 @@ if __name__ == "__main__":
             type = str,
             default = "featurized_clusters",
             help = "Directory to store the matrix of featurized clusters. 2 files will be placed in this directory: 1 for the OrthoDB clusters and 1 for the non-homology clusters."
+            )
+    group_dir.add_argument( "--aliscore_homology_dir",
+            type = str,
+            default = "aliscores_homology",
+            help = "Directory to store the aliscore for all homology clusters."
+            )
+    group_dir.add_argument( "--aliscore_nh_dir",
+            type = str,
+            default = "aliscores_nh",
+            help = "Directory to store the aliscore for all non-homology clusters."
             )
     group_aligner = parser.add_argument_group( "Aligner options", "Options to use for aligning your sequence clusters." )
     group_aligner.add_argument( "--aligner_path",

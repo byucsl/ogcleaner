@@ -20,3 +20,6 @@ lib/seq-gen_bin
 lib/Seq-Gen.v1.3.3/
 lib/Aliscore_v.2.0/
 lib/aliscore_bin
+aliscores_homology/
+aliscores_nh/
+featurized_clusters/

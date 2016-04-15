@@ -13,6 +13,7 @@ Our methodology is based outlined in [**Detecting false positive sequence homolo
 1. python 2
 1. scikit-learn
 1. [Aliscore](https://www.zfmk.de/en/research/research-centres-and-groups/aliscore)
+   1. This program requires perl
 1. [MAFFT](http://mafft.cbrc.jp/alignment/software/)
 1. [PAML](http://abacus.gene.ucl.ac.uk/software/paml.html)
 1. [Seq-Gen](http://tree.bio.ed.ac.uk/software/seqgen/)
