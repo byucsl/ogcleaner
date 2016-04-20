@@ -2,7 +2,12 @@ import sys, argparse, re, time, os
 import numpy as np
 from subprocess import call, Popen, PIPE
 from pathlib import Path
-from multiprocessing import Pool, Lock, Queue
+from multiprocessing import Pool, Lock
+from sklearn.linear_model import LogisticRegression
+from sklearn.neural_network import MLPClassifier
+from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.naive_bayes import MultinomialNB
 
 
 # global variables
@@ -63,10 +68,9 @@ def init_child(lock_):
     lock = lock_
 
 
-def init_child_featurize( lock_, data_dest_, working_dir_, label_, aliscore_path_ ):
-    global lock, data_dest, working_dir, label, aliscore_path
+def init_child_featurize( lock_, working_dir_, label_, aliscore_path_ ):
+    global lock, working_dir, label, aliscore_path
     lock = lock_
-    data_dest = data_dest_
     working_dir = working_dir_
     label = label_
     aliscore_path = aliscore_path_
@@ -508,8 +512,10 @@ def featurize_cluster( item ):
                     seq_aa_special = 0
                     seq_aa_hydrophobic = 0
                     seen_seq = True
+                    length = 0
                 else:
                     ofh.write( line )
+                    length += len( line.strip() )
 
                     c_gaps = line.count( '-' )
                     seq_len = len( line.strip() ) - c_gaps
@@ -585,8 +591,10 @@ def featurize_cluster( item ):
     #data_dest.put( [ aliscore, length, num_seqs, num_gaps, num_aa, range, clust_aa_charged, clust_aa_uncharged, clust_aa_special, clust_aa_hydrophobic, label ] )
 
     with lock:
-        data_dest.append( [ aliscore, length, num_seqs, num_gaps, num_aa, range, clust_aa_charged, clust_aa_uncharged, clust_aa_special, clust_aa_hydrophobic, label ] )
+        #data_dest.append( [ aliscore, length, num_seqs, num_gaps, num_aa, range, clust_aa_charged, clust_aa_uncharged, clust_aa_special, clust_aa_hydrophobic, label ] )
         errw( "\t\t\tFeaturizing of " + group + " Complete\n" )
+
+    return [ aliscore, length, num_seqs, num_gaps, num_aa, range, clust_aa_charged, clust_aa_uncharged, clust_aa_special, clust_aa_hydrophobic, label ]
 
 
 def featurize_clusters( cluster_dir, working_dir, cluster_ids, threads, label, aliscore_path ):
@@ -594,7 +602,6 @@ def featurize_clusters( cluster_dir, working_dir, cluster_ids, threads, label, a
     tasks = [ ( idx, x, cluster_dir + "/" + x ) for idx, x in enumerate( cluster_ids ) ]
     #featurized_clusters = [ 0 for x in cluster_ids ]
     #featurized_clusters = Queue
-    featurized_clusters = []
    
     lock = Lock()
     pool = Pool(
@@ -602,15 +609,17 @@ def featurize_clusters( cluster_dir, working_dir, cluster_ids, threads, label, a
             initializer = init_child_featurize,
             initargs = (
                 lock,
-                featurized_clusters,
                 working_dir,
                 label,
                 aliscore_path,
                 )
             )
-    pool.map( featurize_cluster, tasks )
+    featurized_clusters = pool.map( featurize_cluster, tasks )
     pool.close()
     pool.join()
+
+    #for featurized_cluster in featurized_clusters:
+    #    print featurized_cluster
 
     errw( "\t\tDone featurizing clusters!\n" )
 
@@ -619,12 +628,16 @@ def featurize_clusters( cluster_dir, working_dir, cluster_ids, threads, label, a
 
 def save_featurized_dataset( dest_path, data ):
     errw( "\t\tSaving featurized data set to " + dest_path + "..." )
-    print data
+    #print data
     with open( dest_path, 'w' ) as fh:
         for item in data:
-            print item
+            #print item
             fh.write( ", ".join( map( str, item ) ) + "\n" )
     errw( " Done!\n" )
+
+
+def train( models, features, data ):
+    pass
 
 
 def errw( text ):
@@ -733,6 +746,7 @@ def main( args ):
     save_featurized_dataset( args.featurized_clusters_dir + "/featurized_data.txt", h_featurized + nh_featurized )
 
     # train models
+    model = train( args.models, args.features, h_featurized + nh_featurized )
 
     # perform model tests for validation and performance analysis
 
