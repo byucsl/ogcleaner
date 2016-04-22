@@ -66,10 +66,10 @@ lib/seq-gen_bin/seq-gen:
 	@echo "Done!"
 
 rm_int:
-	rm -rf train_cluster_alignments_homology train_cluster_alignments_nh train_evolved_seqs train_nh_groups_fasta train_orthodb_groups_fasta train_paml_configs train_featurized_clusters train_evolved_seqs train_aliscore_nh train_aliscore_homology
+	rm -rf train_cluster_alignments_homology train_cluster_alignments_nh train_evolved_seqs train_nh_groups_fasta train_orthodb_groups_fasta train_paml_configs train_featurized_clusters train_evolved_seqs train_aliscores_nh train_aliscores_homology train_paml_trees
 	rm -rf classify_aligned_dir classify_featurized_clusters classify_aliscores
 	rm -rf logs
-	rm mc.paml evolver.out SeedUsed siterates.txt paml_trees
+	rm mc.paml evolver.out SeedUsed siterates.txt 
 
 clean: rm_int
 	rm -rf model

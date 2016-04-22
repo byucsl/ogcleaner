@@ -23,10 +23,11 @@ train_evolved_seqs/
 train_nh_groups_fasta/
 train_orthodb_groups_fasta/
 train_paml_configs/
+train_paml_trees/
 train_featurized_clusters/
 train_evolved_seqs/
-train_aliscore_nh/
-train_aliscore_homology/
+train_aliscores_nh/
+train_aliscores_homology/
 
 classify_aligned_dir/
 classify_featurized_clusters/
