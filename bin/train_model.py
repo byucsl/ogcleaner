@@ -14,7 +14,8 @@ from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.ensemble import BaggingClassifier
-
+from sklearn.cross_validation import train_test_split
+from sklearn.metrics import accuracy_score
 
 # global variables
 version = "0.1a"
@@ -80,6 +81,13 @@ models_to_class = {
 def init_child(lock_):
     global lock
     lock = lock_
+
+
+def init_child_train_models( lock_, x_, y_ ):
+    global lock, x, y
+    lock = lock_
+    x = x_
+    y = y_
 
 
 def init_child_featurize( lock_, working_dir_, label_, aliscore_path_ ):
@@ -650,7 +658,17 @@ def save_featurized_dataset( dest_path, data ):
     errw( " Done!\n" )
 
 
-def train( models, features, data ):
+def train_model( model ):
+    cur_model = models_to_class[ model ]()
+    cur_model.fit( x, y )
+
+    with lock:
+        errw( "\t\tTraining " + model + "... Done!\n" )
+
+    return cur_model
+
+
+def train( models, features, data, threads ):
     errw( "\tTraining models\n" )
     # prep the models
     models = models.split( ',' )
@@ -669,27 +687,86 @@ def train( models, features, data ):
     x = data[ features ]
     y = data[ "class" ]
 
+    ## split into test and train
+    ## TODO: parameterize test size
+    ## TODO: parameterize random state for testing reproducibility
+    x_train, x_test, y_train, y_test = train_test_split( x, y, test_size = 0.2 )
+
+    errw( "\t\tTrain size: " + str( len( x_train ) ) + " instances\n" )
+    errw( "\t\tTest size: " + str( len( x_test ) ) + "instances\n" )
+
     if len( models ) > 1:
         meta = True
     else:
         meta = False
 
-    trained_models = []
+    # only multithread if doing multiple models
+    if meta:
+        tasks = models
+        lock = Lock()
+        pool = Pool(
+                threads,
+                initializer = init_child_train_models,
+                initargs = (
+                    lock,
+                    x_train,
+                    y_train
+                    )
+                )
+        trained_models = pool.map( train_model, tasks )
+    else:
+        trained_models = [ models[ 0 ]() ]
+        trained_models[ 0 ].fit( x_train, y_train )
 
-    for model in models:
-        errw( "\t\tTraining " + model + "..." )
-        trained_models.append( models_to_class[ model ]() )
-        trained_models[ -1 ].fit( x, y )
-        errw( "Done!\n" )
+    #trained_models = []
+
+    #for model in models:
+    #    errw( "\t\tTraining " + model + "..." )
+    #    trained_models.append( models_to_class[ model ]() )
+    #    trained_models[ -1 ].fit( x, y )
+    #    errw( "Done!\n" )
 
     if meta:
-        pass
+        # train the meta classifier
+        predictions_train = []
+        for model in trained_models:
+            predictions_train.append( model.predict( x_train ) )
+        #print predictions
+        #print "*" * 20
+        predictions_train = pd.DataFrame( predictions_train ).replace( { "H" : 1, "NH" : 0 } ).transpose()
+        #print predictions
+        #print "*" * 20
+        predictions_train.columns = models
+        #print predictions
+        #print "*" * 20
+        trained_models.append( MLPClassifier() )
+        trained_models[ -1 ].fit( predictions_train, y_train )
+
+        # get test set predictions
+        ## first predict using all other methods
+        predictions_test = []
+        for model in trained_models[ : -1 ]:
+            predictions_test.append( model.predict( x_test ) )
+
+        predictions_test = pd.DataFrame( predictions_test ).replace( { "H" : 1, "NH" : 0 } ).transpose()
+        predictions_test.columns = models
+        predictions_test.append( trained_models[ -1 ].predict( x_test ) )
     else:
-        pass
+        # get test set predictions
+        predictions_test.append( trained_models[ 0 ].predict( x_test ) )
+
+    # output accuracy
+    accuracy = accuracy_score( y_test, predictions_test[ -1 ] )
+    errw( "\t\tTest set accuracy: " + str( accuracy ) + "\n" )
 
     errw( "\tDone training models!\n" )
 
     return models
+
+
+#TODO: implement
+def run_validation():
+    pass
 
 
 def save_models( save_prefix, models, features, trained_models ):
@@ -827,7 +904,10 @@ def train_models( args ):
     save_featurized_dataset( args.featurized_clusters_dir + "/featurized_data.txt", h_featurized + nh_featurized )
 
     # train models
-    models = train( args.models, args.features, h_featurized + nh_featurized )
+    if args.test:
+        run_validation()
+    else:
+        models = train( args.models, args.features, h_featurized + nh_featurized, args.threads )
 
     # save models
     save_models( args.save_prefix, args.models, args.features, models )
