@@ -1,13 +1,19 @@
-import sys, argparse, re, time, os
+'''
+This script is designed to train the models necessary for 
+'''
+
+import sys, argparse, re, time, os, pickle
 import numpy as np
 from subprocess import call, Popen, PIPE
 from pathlib import Path
 from multiprocessing import Pool, Lock
+import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.naive_bayes import MultinomialNB
+from sklearn.ensemble import BaggingClassifier
 
 
 # global variables
@@ -58,9 +64,17 @@ aa_charged = [ 'E', 'D', 'K', 'H', 'R' ]
 aa_hydrophobic = [ 'W', 'I', 'Y', 'F', 'V', 'M', 'L', 'A' ]
 
 
-# TODO: enumerate all possible models and features
 available_models = "svm,neural_network,random_forest,naive_bayes,logistic_regression"
 available_features = "aliscore,length,num_seqs,num_gaps,num_amino_acids,range,amino_acid_charged,amino_acid_uncharged,amino_acid_special,amino_acid_hydrophobic"
+
+
+models_to_class = {
+        "svm" : SVC,
+        "neural_network" : MLPClassifier,
+        "random_forest" : RandomForestClassifier,
+        "naive_bayes" : MultinomialNB,
+        "logistic_regression" : LogisticRegression
+        }
 
 
 def init_child(lock_):
@@ -637,7 +651,60 @@ def save_featurized_dataset( dest_path, data ):
 
 
 def train( models, features, data ):
-    pass
+    errw( "\tTraining models\n" )
+    # prep the models
+    models = models.split( ',' )
+
+    # prep features
+    # needed for data prep
+    features = features.split( ',' )
+
+    # prep the data
+    ## turn the data into a pandas dataframe with appropriate labels
+    columns = available_features.split( ',' )
+    columns.append( "class" )
+    data = pd.DataFrame( data, columns = columns )
+
+    ## separate into features and labels
+    x = data[ features ]
+    y = data[ "class" ]
+
+    if len( models ) > 1:
+        meta = True
+    else:
+        meta = False
+
+    trained_models = []
+
+    for model in models:
+        errw( "\t\tTraining " + model + "..." )
+        trained_models.append( models_to_class[ model ]() )
+        trained_models[ -1 ].fit( x, y )
+        errw( "Done!\n" )
+
+    if meta:
+        pass
+    else:
+        pass
+
+    errw( "\tDone training models!\n" )
+
+    return models
+
+
+def save_models( save_prefix, models, features, trained_models ):
+    errw( "\tSaving models..." )
+    
+    with open( save_prefix + ".trained_models", "wb" ) as fh:
+        pickle.dump( trained_models, fh )
+
+    with open( save_prefix + ".features", 'w' ) as fh:
+        fh.write( features )
+
+    with open( save_prefix + ".models", 'w' ) as fh:
+        fh.write( models )
+
+    errw( "Done!\n" )
 
 
 def errw( text ):
@@ -655,18 +722,24 @@ def dir_check( dir_path ):
             sys.exit( "ERROR! Could not create the directory " + dir_path + ". Aborting!" )
 
 
-def main( args ):
-    errw( "OrthoClean model training module version " + version + "\n" )
+def train_models( args ):
     errw( "Aligner: " + args.aligner_path + "\n" )
     errw( "Aligner args: " + args.aligner_options + "\n" )
 
-    if args.seed != -1:
-        errw( "Setting random number seed to: " + str( args.seed ) + "\n" )
-        np.random.seed( args.seed )
+    # verify parameters
+    ## verify specified models
+    check_models = args.models.split( ',' )
+    for model in check_models:
+        if model not in models_to_class.keys():
+            sys.exit( "ERROR! User specified invalid model: " + model )
 
-    errw( "Beginning...\n" )
+    ## verify specified features
+    check_feats = args.features.split( ',' )
+    feats_avail = available_features.split( ',' )
+    for feat in check_feats:
+        if feat not in feats_avail:
+            sys.exit( "ERROR! User specified invalid feature: " + feat )
 
-    # param checking
     ## check if the output directory exists
     dir_check( args.orthodb_groups_dir )
     dir_check( args.nh_groups_dir )
@@ -679,6 +752,14 @@ def main( args ):
     dir_check( args.featurized_clusters_dir )
     dir_check( args.aliscore_homology_dir )
     dir_check( args.aliscore_nh_dir )
+    
+    # end verify parameters
+
+    if args.seed != -1:
+        errw( "Setting random number seed to: " + str( args.seed ) + "\n" )
+        np.random.seed( args.seed )
+
+    errw( "Beginning...\n" )
 
     ortho_groups = segregate_orthodb_groups( args.orthodb_fasta, args.orthodb_groups_dir )
 
@@ -746,10 +827,70 @@ def main( args ):
     save_featurized_dataset( args.featurized_clusters_dir + "/featurized_data.txt", h_featurized + nh_featurized )
 
     # train models
-    model = train( args.models, args.features, h_featurized + nh_featurized )
+    models = train( args.models, args.features, h_featurized + nh_featurized )
 
-    # perform model tests for validation and performance analysis
+    # save models
+    save_models( args.save_prefix, args.models, args.features, models )
 
+
+def parse_cluster_paths( file_path ):
+    errw( "\tParsing cluster paths..." )
+    cluster_paths = []
+    with open( file_path ) as fh:
+        for line in fh:
+            cluster_paths.append( line.strip() )
+    wrre( "Done!\n" )
+
+    return cluster_paths
+
+
+def load_models( models_prefix ):
+    errw( "\tLoading models..." )
+    with open( models_prefix + ".trained_models" ) as fh:
+        models = pickle.load( fh )
+    errw( "Done!\n" )
+
+    return models
+
+
+def classify_clusters( args ):
+    errw( "Classifying clusters!\n" )
+
+    # verify parameters
+    ## check if all directories required exist
+    dir_check( args.logs_dir )
+    dir_check( args.featurized_clusters_dir )
+    dir_check( args.aliscore_dir )
+
+    # end verify parameters
+
+    # get cluster paths
+    cluster_paths = parse_cluster_paths( args.fasta_list )
+
+    # if need to align, align clusters
+    if not args.aligned:
+        # check if aligned dir exsists
+        dir_check( args.aligned_dir )
+
+        # align the clusters and save to a folder
+
+        # reset cluster_paths to the clusters in the folder
+
+    # featurize clusters
+
+    # load models
+    models = load_models( args.models_prefix )
+
+    # classify
+
+
+def main( args ):
+    errw( "OrthoClean model training module version " + version + "\n" )
+
+    if args.which == "train":
+        train_models( args )
+    elif args.which == "classify":
+        classify_clusters( args )
 
     errw( "Finished!\n" )
 
@@ -759,143 +900,223 @@ if __name__ == "__main__":
             description = "Train models to clean putative orthology clusters. Methodology published in Detecting false positive sequence homology: a machine learning approach, BMC Bioinformatics (24 February 2016, http://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-016-0955-3). Please contact M. Stanley Fujimoto at sfujimoto@gmail.com for any questions.",
             formatter_class = argparse.ArgumentDefaultsHelpFormatter
             )
-    parser.add_argument_group( "Input", "Input files to run the program." )
-    parser.add_argument( "--orthodb_fasta",
+
+    # sub parsers
+    sp = parser.add_subparsers()
+    sp_train = sp.add_parser( "train",
+            help = "Train filtering models."
+            )
+    sp_train.set_defaults( which = "train" )
+
+    sp_classify = sp.add_parser( "classify",
+            help = "Classify clusters. Cluster classifications are written to standard out, redirect this output to a file to store results."
+            )
+    sp_classify.set_defaults( which = "classify" )
+
+
+    # sub parser classify options
+    classify_group_in = sp_classify.add_argument_group( "Input", "Input files to run the program." )
+    classify_group_in.add_argument( "--fasta_list",
             type = str,
             required = True,
-            help = "Fasta file downloaded from orthodb."
+            help = "A list containing all the paths to your fasta files. One file per line."
             )
-    group_dir = parser.add_argument_group( "Directories", "Directories where output will be stored." )
-    group_dir.add_argument( "--orthodb_groups_dir",
+    classify_group_in.add_argument( "--models",
             type = str,
-            default = "orthodb_groups_fasta",
-            help = "Directory to store OrthoDB sequence clusters in fasta format."
+            required = True,
+            help = "Trained models used for classification."
             )
-    group_dir.add_argument( "--nh_groups_dir",
+
+    classify_group_opts = sp_classify.add_argument_group( "Options", "Options for running the program." )
+    classify_group_opts.add_argument( "--aligned",
+            default = False,
+            action = "store_true",
+            help = "If your fasta file is already aligned, alignment will skip."
+            )
+
+    classify_group_models = sp_classify.add_argument_group( "Model Options", "Options for loading trained models." )
+    classify_group_models.add_argument( "--models_prefix",
             type = str,
-            default = "nh_groups_fasta",
-            help = "Directory to store the non-homology sequence clusters in fasta format."
+            required = True,
+            help = "Prefix of the saved models."
             )
-    group_dir.add_argument( "--paml_configs_dir",
+
+    classify_group_dir = sp_classify.add_argument_group( "Directories", "Directories where output will be stored." )
+    classify_group_dir.add_argument( "--aligned_dir",
             type = str,
-            default = "paml_configs",
-            help = "Directory to store the PAML configuration files."
+            default = "classify_aligned_dir",
+            help = "Directory to store cluster alignments."
             )
-    group_dir.add_argument( "--logs_dir",
+    classify_group_dir.add_argument( "--logs_dir",
             type = str,
             default = "logs",
             help = "Directory to store progress output from programs."
             )
-    group_dir.add_argument( "--aligned_homology_dir",
+    classify_group_dir.add_argument( "--featurized_clusters_dir",
             type = str,
-            default = "cluster_alignments_homology",
+            default = "classify_featurized_clusters",
+            help = "Directory to store the matrix of featurized clusters."
+            )
+    classify_group_dir.add_argument( "--aliscore_dir",
+            type = str,
+            default = "classify_aliscores",
+            help = "Directory to store the aliscore for clusters."
+            )
+
+    # sub parser train options
+    group_in = sp_train.add_argument_group( "Input", "Input files to run the program." )
+    group_in.add_argument( "--orthodb_fasta",
+            type = str,
+            required = True,
+            help = "Fasta file downloaded from orthodb."
+            )
+
+    train_group_dir = sp_train.add_argument_group( "Directories", "Directories where output will be stored." )
+    train_group_dir.add_argument( "--orthodb_groups_dir",
+            type = str,
+            default = "train_orthodb_groups_fasta",
+            help = "Directory to store OrthoDB sequence clusters in fasta format."
+            )
+    train_group_dir.add_argument( "--nh_groups_dir",
+            type = str,
+            default = "train_nh_groups_fasta",
+            help = "Directory to store the non-homology sequence clusters in fasta format."
+            )
+    train_group_dir.add_argument( "--paml_configs_dir",
+            type = str,
+            default = "train_paml_configs",
+            help = "Directory to store the PAML configuration files."
+            )
+    train_group_dir.add_argument( "--logs_dir",
+            type = str,
+            default = "logs",
+            help = "Directory to store progress output from programs."
+            )
+    train_group_dir.add_argument( "--aligned_homology_dir",
+            type = str,
+            default = "train_cluster_alignments_homology",
             help = "Directory to store all OrthoDB homology alignments."
             )
-    group_dir.add_argument( "--aligned_nh_dir",
+    train_group_dir.add_argument( "--aligned_nh_dir",
             type = str,
-            default = "cluster_alignments_nh",
+            default = "train_cluster_alignments_nh",
             help = "Directory to store all false-positive homology alignments."
             )
-    group_dir.add_argument( "--paml_trees_dir",
+    train_group_dir.add_argument( "--paml_trees_dir",
             type = str,
-            default = "paml_trees",
+            default = "train_paml_trees",
             help = "Directory to store trees generated from PAML."
             )
-    group_dir.add_argument( "--evolved_seqs_dir",
+    train_group_dir.add_argument( "--evolved_seqs_dir",
             type = str,
-            default = "evolved_seqs",
+            default = "train_evolved_seqs",
             help = "Directory to store evolved sequences."
             )
-    group_dir.add_argument( "--featurized_clusters_dir",
+    train_group_dir.add_argument( "--featurized_clusters_dir",
             type = str,
-            default = "featurized_clusters",
-            help = "Directory to store the matrix of featurized clusters. 2 files will be placed in this directory: 1 for the OrthoDB clusters and 1 for the non-homology clusters."
+            default = "train_featurized_clusters",
+            help = "Directory to store the matrix of featurized clusters. 1 file will be placed in this directory: a concatenation of the OrthoDB clusters and the non-homology clusters."
             )
-    group_dir.add_argument( "--aliscore_homology_dir",
+    train_group_dir.add_argument( "--aliscore_homology_dir",
             type = str,
-            default = "aliscores_homology",
+            default = "train_aliscores_homology",
             help = "Directory to store the aliscore for all homology clusters."
             )
-    group_dir.add_argument( "--aliscore_nh_dir",
+    train_group_dir.add_argument( "--aliscore_nh_dir",
             type = str,
-            default = "aliscores_nh",
+            default = "train_aliscores_nh",
             help = "Directory to store the aliscore for all non-homology clusters."
             )
-    group_aligner = parser.add_argument_group( "Aligner options", "Options to use for aligning your sequence clusters." )
-    group_aligner.add_argument( "--aligner_path",
+
+    train_group_aligner = sp_train.add_argument_group( "Aligner options", "Options to use for aligning your sequence clusters." )
+    train_group_aligner.add_argument( "--aligner_path",
             type = str,
             default = default_mafft_path,
             help = "Default aligner is MAFFT and is set up during install. If you already have MAFFT or another aligner installed, provide the path here. NOTE: this program is only designed to work with MAFFT, other aligners will take modification."
             )
-    group_aligner.add_argument( "--aligner_options",
+    train_group_aligner.add_argument( "--aligner_options",
             type = str,
             default = "",
             help = "Options for your aligner."
             )
-    group_paml = parser.add_argument_group( "PAML options" )
-    group_paml.add_argument( "--paml_path",
+
+    train_group_paml = sp_train.add_argument_group( "PAML options" )
+    train_group_paml.add_argument( "--paml_path",
             type = str,
             default = default_paml_path,
             help = "Path to the PAML evolverRandomTree binary."
             )
-    group_seqgen = parser.add_argument_group( "Seq-Gen options", "Options for Seq-Gen, used for evolving sequences." )
-    group_seqgen.add_argument( "--seqgen_path",
+
+    train_group_seqgen = sp_train.add_argument_group( "Seq-Gen options", "Options for Seq-Gen, used for evolving sequences." )
+    train_group_seqgen.add_argument( "--seqgen_path",
             type = str,
             default = default_seqgen_path,
             help = "Path to the Seq-Gen binary."
             )
-    group_seqgen.add_argument( "--seqgen_opts",
+    train_group_seqgen.add_argument( "--seqgen_opts",
             type = str,
             default = default_seqgen_opts,
             help = "Options for running Seq-Gen."
             )
-    group_aliscore = parser.add_argument_group( "Aliscore options" )
-    group_aliscore.add_argument( "--aliscore_path",
+
+    train_group_aliscore = sp_train.add_argument_group( "Aliscore options" )
+    train_group_aliscore.add_argument( "--aliscore_path",
             type = str,
             default = default_aliscore_path,
             help = "Path to the aliscore binary."
             )
-    group_model = parser.add_argument_group( "Model training", "Models and features available for training" )
-    group_model.add_argument( "--models",
+
+    train_group_model = sp_train.add_argument_group( "Model training", "Models and features available for training" )
+    train_group_model.add_argument( "--models",
             type = str,
             default = available_models,
             help = "A comma separated list of models to use. Available models include: " + ", ".join( available_models.split( ',' ) ) + ". If more than one model is selected, a meta-classifier is used that combined all specified models."
             )
-    group_model.add_argument( "--features",
+    train_group_model.add_argument( "--features",
             type = str,
             default = available_features,
             help  = "A comma separted list of features to use when training models. Available features include: " + ", ".join( available_features.split( ',' ) ) + "."
             )
-    group_misc = parser.add_argument_group( "Misc.", "Extra options you can set when you're running the program." )
-    group_misc.add_argument( "--threads",
+
+    train_group_misc = sp_train.add_argument_group( "Misc.", "Extra options you can set when you're running the program." )
+    train_group_misc.add_argument( "--threads",
             type = int,
             default = 1,
             help = "Number of threads to use during alignment (Default 1)."
             )
-    group_misc.add_argument( "--seed",
+    train_group_misc.add_argument( "--seed",
             type = int,
             default = -1,
             help = "Seed to use for generating trees in PAML and for sampling sequences for non-homology cluster generation."
             )
-    group_skip = parser.add_argument_group( "Skip parts of the pipeline", "If you've already completed parts of the pipeline you can skip steps with these flags. Note: each flag requires you specify an output directory for the step you're skipping. Steps are listed in order, if you skip a step, all steps before it are skipped as well." )
-    group_skip.add_argument( "--skip_segregate",
+
+    train_group_skip = sp_train.add_argument_group( "Skip parts of the pipeline", "If you've already completed parts of the pipeline you can skip steps with these flags. Note: each flag requires you specify an output directory for the step you're skipping. Steps are listed in order, if you skip a step, all steps before it are skipped as well." )
+    train_group_skip.add_argument( "--skip_segregate",
             type = str,
             help = "Skip segregating the fasta file from OrthoDB into separate fasta files for each group. Provide the path to the directory that contains all the segregated ortho groups in fasta format."
             )
-    group_skip.add_argument( "--skip_align_orthodb",
+    train_group_skip.add_argument( "--skip_align_orthodb",
             type = str,
             help = "Skip alignment process for each OrthoDB orthology group. Provide the path to the directory with the OrthBD alignments in fasta format."
             )
-    group_skip.add_argument( "--skip_generate_nh",
+    train_group_skip.add_argument( "--skip_generate_nh",
             type = str,
             help = "Skip the generation process of false-positive homology clusters. Provide the path to the directory with all false-positive homology clusters in fasta format."
             )
-    group_skip.add_argument( "--skip_align_nh",
+    train_group_skip.add_argument( "--skip_align_nh",
             type = str,
             help = "Skip the alignment process for each false-positive homoloy clusters. Provide the path to the directory with all fasle-positive homology cluster alignments in fasta format."
             )
-    group_test = parser.add_argument_group( "Testing", "Test your machine learning models." )
-    group_test.add_argument( "--test",
+
+    train_group_save = sp_train.add_argument_group( "Saving", "Options for saving your trained models." )
+    train_group_save.add_argument( "--save_prefix",
+            type = str,
+            default = "trained_model",
+            help = "Save prefix for your trained models"
+            )
+
+    train_group_test = sp_train.add_argument_group( "Testing", "Test your machine learning models." )
+    train_group_test.add_argument( "--test",
             default = False,
             action = "store_true",
             help = "Do boostrapping analysis, tests, etc. to see how well your trained models are performing."
