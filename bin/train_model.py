@@ -17,8 +17,72 @@ from sklearn.ensemble import BaggingClassifier
 from sklearn.cross_validation import train_test_split
 from sklearn.metrics import accuracy_score
 import matplotlib.pyplot as plt
-import math
+import math, warnings
 from random import shuffle
+
+
+available_models = "svm,neural_network,random_forest,naive_bayes,logistic_regression"
+available_features = "aliscore,length,num_seqs,num_gaps,num_amino_acids,range,amino_acid_charged,amino_acid_uncharged,amino_acid_special,amino_acid_hydrophobic"
+
+
+# our own meta-classifier
+class Metaclassifier:
+    '''
+    a meta-classifier that uses several other base classifiers to produce its own classifications
+    '''
+
+    def __init__( self, model_names = available_models.split( ',' ) ):
+        '''
+        model_names = a python list of model names, the model names should correspond to the used models
+        '''
+        self.model_names = model_names
+        self.models = [ model_to_class[ x ]() for x in model_names ]
+        self.skip_models = [ 0 ] * len( self.models )
+        self.models.append( MLPClassifier() )
+
+    def generate_base_classifier_predictions( self, x ):
+        predictions = []
+        # create predictions for all classifier except for the last one, the meta-classifier
+        for idx, model in enumerate( self.models[ : -1 ] ):
+            # if the model was untrainable during the bootstrapping process, we mark everything
+            # as a homology cluster
+            if self.skip_models[ idx ] == 1:
+                predictions.append( np.array( [ 'H' ] * len( x ) ) )
+            else:
+                predictions.append( model.predict( x ) )
+
+        predictions = pd.DataFrame( predictions ).replace( { 'H' : 1, "NH" : 0 } ).transpose()
+        predictions.columns = self.model_names
+        return predictions
+
+    def train_base_classifiers( self, x, y ):
+        for idx, model in enumerate( self.models[ : -1 ] ):
+            try:
+                model.fit( x, y )
+            except ValueError:
+                # could not train the model
+                # should only happen during bootstrap analysis when both H and NH are not present in
+                # the training data, not too concerned about this
+                # mark a model as untrained
+                self.skip_models[ idx ] = 1
+            #except ConvergenceWarning:
+            #    # the model didn't converge
+            #    pass
+
+    def fit( self, x, y ):
+        self.train_base_classifiers( x, y )
+        predictions = self.generate_base_classifier_predictions( x )
+        try:
+            self.models[ -1 ].fit( predictions, y )
+        except:
+            pass
+        #except ConvergenceWarning:
+        #    # the model didn't converge
+        #    pass
+
+    def predict( self, x ):
+        predictions = self.generate_base_classifier_predictions( x )
+        return self.models[ -1 ].predict( predictions )
 
 
 # global variables
@@ -31,6 +95,10 @@ default_paml_path = str( base_path ) + "/lib/paml_bin/evolverRandomTree"
 default_seqgen_path = str( base_path ) + "/lib/seq-gen_bin/seq-gen"
 default_aliscore_path = str( base_path ) + "/lib/Aliscore_v.2.0/Aliscore.02.2.pl"
 default_seqgen_opts = "-mWAG -k1 -n1"
+
+# number of replicates for bootstrap analysis when testing the models
+# TODO: change this to 100
+num_replicates = 100
 
 # amino acid properties
 # courtesy of Nick Jensen, thanks Nick!
@@ -68,19 +136,21 @@ aa_uncharged_polar = [ 'S', 'N', 'Q', 'T' ]
 aa_charged = [ 'E', 'D', 'K', 'H', 'R' ]
 aa_hydrophobic = [ 'W', 'I', 'Y', 'F', 'V', 'M', 'L', 'A' ]
 
-
-available_models = "svm,neural_network,random_forest,naive_bayes,logistic_regression"
-available_features = "aliscore,length,num_seqs,num_gaps,num_amino_acids,range,amino_acid_charged,amino_acid_uncharged,amino_acid_special,amino_acid_hydrophobic"
-
 default_bootstrap_percentages = "1,2,3,4,5,6,7,8,9,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100"
 
-models_to_class = {
+model_to_class = {
         "svm" : SVC,
         "neural_network" : MLPClassifier,
         "random_forest" : RandomForestClassifier,
         "naive_bayes" : MultinomialNB,
-        "logistic_regression" : LogisticRegression
+        "logistic_regression" : LogisticRegression,
+        "metaclassifier" : Metaclassifier
         }
+
+
+def share_model_to_class( model_to_class_ ):
+    global model_to_class
+    model_to_class = model_to_class_
 
 
 def init_child(lock_):
@@ -680,7 +750,7 @@ def save_featurized_dataset( dest_path, readable_data, pickle_dest_path, pd_data
     errw( " Done!\n" )
 
 def train_model( model ):
-    cur_model = models_to_class[ model ]()
+    cur_model = model_to_class[ model ]()
     cur_model.fit( x, y )
 
     with lock:
@@ -720,77 +790,49 @@ def create_trained_models( models, features, data, threads ):
     errw( "\t\tTrain size: " + str( len( x_train ) ) + " instances\n" )
     errw( "\t\tTest size: " + str( len( x_test ) ) + "instances\n" )
 
+    trained_models = []
     if len( models ) > 1:
-        meta = True
+        model = Metaclassifier( models )
     else:
-        meta = False
+        model = models[ 0 ]()
+    
+    model.fit( x_train, y_train )
 
-    # only multithread if doing multiple models
-    if meta:
-        tasks = models
-        lock = Lock()
-        pool = Pool(
-                threads,
-                initializer = init_child_train_models,
-                initargs = (
-                    lock,
-                    x_train,
-                    y_train
-                    )
-                )
-        trained_models = pool.map( train_model, tasks )
-    else:
-        trained_models = [ models[ 0 ]() ]
-        trained_models[ 0 ].fit( x_train, y_train )
-
-    #trained_models = []
-
-    #for model in models:
-    #    errw( "\t\tTraining " + model + "..." )
-    #    trained_models.append( models_to_class[ model ]() )
-    #    trained_models[ -1 ].fit( x, y )
-    #    errw( " Done!\n" )
-
-    if meta:
-        # train the meta classifier
-        predictions_train = []
-        for model in trained_models:
-            predictions_train.append( model.predict( x_train ) )
-        #print predictions
-        #print "*" * 20
-        predictions_train = pd.DataFrame( predictions_train ).replace( { "H" : 1, "NH" : 0 } ).transpose()
-        #print predictions
-        #print "*" * 20
-        predictions_train.columns = models
-        #print predictions
-        #print "*" * 20
-        trained_models.append( MLPClassifier() )
-        trained_models[ -1 ].fit( predictions_train, y_train )
-
-        # get test set predictions
-        ## first predict using all other methods
-        predictions_test = []
-        for model in trained_models[ : -1 ]:
-            predictions_test.append( model.predict( x_test ) )
-
-        predictions_test = pd.DataFrame( predictions_test ).replace( { "H" : 1, "NH" : 0 } ).transpose()
-        predictions_test.columns = models
-        predictions_test.append( trained_models[ -1 ].predict( x_test ) )
-    else:
-        # get test set predictions
-        predictions_test.append( trained_models[ 0 ].predict( x_test ) )
+    predictions_test = model.predict( x_test )
 
     # output accuracy
-    accuracy = accuracy_score( y_test, predictions_test[ -1 ] )
+    accuracy = accuracy_score( y_test, predictions_test )
     errw( "\t\tTest set accuracy: " + str( accuracy ) + "\n" )
 
     errw( "\tDone training models!\n" )
 
-    return models
+    return model
+
+
+def train_return_acc( item ):
+    x_train = item[ 0 ]
+    y_train = item[ 1 ]
+    x_test = item[ 2 ]
+    y_test = item[ 3 ]
+    model = model_to_class[ item[ 4 ] ]()
+
+    with warnings.catch_warnings():
+        warnings.simplefilter( "ignore" )
+        try:
+            model.fit( x_train, y_train )
+            preds = model.predict( x_test )
+            acc = accuracy_score( y_test, preds )
+
+            return acc
+        except ValueError:
+            return 0.
+        except Warning:
+            return 0.
+    return 0.
 
 
 # These are tests that will help verify results of the models
-def run_validation( test_dir, data ):
+def run_validation( test_dir, data, threads ):
     errw( "\tRunning validation...\n" )
 
     boot_percs = map( int, default_bootstrap_percentages.split( ',' ) )
@@ -799,76 +841,188 @@ def run_validation( test_dir, data ):
     features = available_features.split( ',' )
 
     # first, split the data into train and test
+    # TODO: parameterize the test size
     train, test = train_test_split( data, test_size = 0.2 )
 
     # set up test data
     x_test = test[ features ]
     y_test = test[ "class" ]
+    
+    # pool for multithreading
 
     ## check inidivudal model performance with bootstrap analysis
     ## this is run for 100 replicates
     errw( "\t\tValidate models...\n" )
-    all_percs = dict()
-    for model_name, model_class in models_to_class.iteritems():
+    all_percs_train = dict()
+    all_percs_test = dict()
+    for model_name, model_class in model_to_class.iteritems():
         errw( "\t\t\tValidating " + model_name + "..." )
-        model_acc = []
-        model = model_class()
+        model_acc_train = []
+        model_acc_test = []
+        #model = model_class()
 
         for boot_perc in boot_percs:
             boot_perc_acc = []
             num_instances = int( math.ceil( ( float( boot_perc ) / 100 ) * len( train ) ) )
 
             #print "number of instances: " + str( num_instances )
-            
-            for i in range( 100 ):
+            tasks_test = []
+            tasks_train = []
+            for i in range( num_replicates ):
                 # get the sub-sampled data
                 sub_train = train.sample( n = num_instances, replace = True )
                 x_train = sub_train[ features ]
                 y_train = sub_train[ "class" ]
 
-                try:
-                    model.fit( x_train, y_train )
-                    preds = model.predict( x_test )
-                    acc = accuracy_score( y_test, preds )
+                tasks_train.append( ( x_train, y_train, x_train, y_train, model_name ) )
+                tasks_test.append( ( x_train, y_train, x_test, y_test, model_name ) )
 
-                    boot_perc_acc.append( acc )
-                except ValueError:
-                    boot_perc_acc.append( 0. )
+            pool = Pool( threads, initializer = share_model_to_class, initargs = ( model_to_class, ) )
+            boot_perc_acc = pool.map( train_return_acc, tasks_test )
+            pool.close()
+            pool.join()
+            model_acc_test.append( boot_perc_acc )
 
-            model_acc.append( boot_perc_acc )
+            pool = Pool( threads, initializer = share_model_to_class, initargs = ( model_to_class, ) )
+            boot_perc_acc = pool.map( train_return_acc, tasks_train )
+            pool.close()
+            pool.join()
+            model_acc_train.append( boot_perc_acc )
+
         errw( " Done!\n" )
-        formatted_percs = pd.DataFrame( model_acc ).transpose()
+        formatted_percs = pd.DataFrame( model_acc_test ).transpose()
         formatted_percs.columns = boot_percs
-        all_percs[ model_name ] = formatted_percs
+        all_percs_test[ model_name ] = formatted_percs
+
+        formatted_percs = pd.DataFrame( model_acc_train ).transpose()
+        formatted_percs.columns = boot_percs
+        all_percs_train[ model_name ] = formatted_percs
     errw( "\t\tCompleted model validation\n" )
 
-    errw( "\t\tWriting accuracies and plots to disk...\n" )
-    # create plots for each model
-    for model, percs in all_percs.iteritems():
-        errw( "\t\t\tWriting " + model + " accuracy values to disk..." )
+    errw( "\t\tWriting accuracy plots to disk...\n" )
+    for model, percs in all_percs_train.iteritems():
+        errw( "\t\t\tGenerating plot for " + model + "..." )
 
-        with open( test_dir + "/bootstrap_values." + model + ".csv", 'w' ) as fh:
-            fh.write( percs.to_csv() )
+        avgs_train = percs.mean()
+        errs_train = percs.std()
+
+        avgs_test = all_percs_test[ model ].mean()
+        errs_test = all_percs_test[ model ].std()
+
+        avgs = pd.DataFrame( [ avgs_train, avgs_test ] ).transpose()
+        avgs.columns = [ "Train", "Test" ]
+
+        errs = pd.DataFrame( [ errs_train, errs_test ] ).transpose()
+        errs.columns = [ "Train", "Test" ]
+
+        fig, ax = plt.subplots()
+        fig.set_size_inches( 12, 8, forward = True )
+        plt.title( model + " accuracy" )
+        plt.ylim( 0.0, 1.0 )
+        plt.xlabel( "% of total training set" )
+        plt.ylabel( "% accuracy" )
+        avgs.plot.line( ax = ax, color = [ 'b', 'r' ] )
+        plt.fill_between( avgs.index.values, avgs[ "Train" ] - errs[ "Train" ], avgs[ "Train" ] + errs[ "Train" ], facecolor = 'blue', alpha = 0.2 )
+        plt.fill_between( avgs.index.values, avgs[ "Test" ] - errs[ "Test" ], avgs[ "Test" ] + errs[ "Test" ], facecolor = 'red', alpha = 0.2 )
+        plt.xticks( avgs.index.values, map( str, avgs.index.values ), fontsize = 8 )
+        plt.savefig( test_dir + "/model_validation.bootstrap_plot." + model + ".png" )
 
         errw( " Done!\n" )
 
-        errw( "\t\t\tGenerating plot for " + model + "..." )
+    errw( "\t\tCompleted writing data to disk!\n" )
 
+    errw( "\t\tWriting model accuracies to disk...\n" )
+    # create plots for each model
+    for dataset, all_percs in [ ( "train", all_percs_train ), ( "test", all_percs_test ) ]:
+        for model, percs in all_percs.iteritems():
+            errw( "\t\t\tWriting " + model + " " + dataset + " dataset accuracy values to disk..." )
+
+            with open( test_dir + "/model_validation." + dataset + ".bootstrap_values." + model + ".csv", 'w' ) as fh:
+                fh.write( percs.to_csv() )
+
+            errw( " Done!\n" )
+
+    errw( "\t\tCompleted writing data to disk!\n" )
+
+    errw( "\t\tValidate features...\n" )
+    ## check individual feature performance using the metaclassifier
+    ## this is run for 100 replicates
+    all_feature_percs = dict()
+    for feature in features:
+        errw( "\t\t\tValidating " + feature + "..." )
+        feature_acc = []
+        for boot_perc in boot_percs:
+            boot_perc_acc = []
+            num_instances = int( math.ceil( ( float( boot_perc ) / 100 ) * len( train ) ) )
+
+            tasks = []
+            for i in range( num_replicates ):
+                sub_train = train.sample( n = num_instances, replace = True )
+                x_train = sub_train[ feature ].reshape(-1, 1)
+                y_train = sub_train[ "class" ]
+                tasks.append( ( x_train, y_train, x_test[ feature ].reshape( -1, 1 ), y_test, "metaclassifier" ) )
+                
+                #model = model_to_class[ "metaclassifier" ]()
+                #model.fit( x_train, y_train )
+
+                #preds = model.predict( x_test[ feature ].reshape(-1, 1) )
+                #acc = accuracy_score( y_test, preds )
+                #boot_perc_acc.append( acc )
+            pool = Pool( threads, initializer = share_model_to_class, initargs = ( model_to_class, ) )
+            boot_perc_acc = pool.map( train_return_acc, tasks )
+            pool.close()
+            pool.join()
+            feature_acc.append( boot_perc_acc )
+        formatted_percs = pd.DataFrame( feature_acc ).transpose()
+        formatted_percs.columns = boot_percs
+        all_feature_percs[ feature ] = formatted_percs
+        errw( " Done!\n" )
+
+    pool.close()
+    errw( "\t\tWriting accuracies to disk...\n" )
+    # create plots for each model
+
+    model = "metaclassifier"
+    all_means = []
+    all_errs = []
+    col_names = []
+    for feature, percs in all_feature_percs.iteritems():
+        errw( "\t\t\tWriting " + feature + " accuracy values to disk..." )
+
+        with open( test_dir + "/feature_validation.bootstrap_values." + model + "." + feature + ".csv", 'w' ) as fh:
+            fh.write( percs.to_csv() )
+
+        col_names.append( feature )
         avgs = percs.mean()
         errs = percs.std()
 
-        #print "averages"
-        #print avgs
-
-        fig, ax = plt.subplots()
-        avgs.plot.line( yerr = errs, ax = ax )
-        plt.savefig( test_dir + "/bootstrap_plot." + model + ".png" )
+        all_means.append( avgs )
+        all_errs.append( errs )
 
         errw( " Done!\n" )
-    errw( "\t\tCompleted writing data and plots to disk!\n" )
 
-    ## check individual feature performance using the metaclassifier
-    ## this is run for 100 replicates
+    errw( "\t\tGenerating features plot..." )
+
+    all_means = pd.DataFrame( all_means ).transpose()
+    all_means.columns = col_names
+    colors = [ "blue", "red", "yellow", "orange", "green", "black", "cyan", "gray", "purple", "pink" ]
+
+    fig, ax = plt.subplots()
+    fig.set_size_inches( 12, 8, forward = True )
+    plt.title( model + " test set accuracy per feature" )
+    plt.ylim( 0.0, 1.0 )
+    plt.xlabel( "% of total training set" )
+    plt.ylabel( "% accuracy" )
+    all_means.plot.line( ax = ax, color = colors )
+
+    for idx, feature in enumerate( col_names ):
+        plt.fill_between( all_means.index.values, all_means[ feature ] - errs, all_means[ feature ] + errs, facecolor = colors[ idx ], alpha = 0.1 )
+
+    plt.xticks( all_means.index.values, map( str, all_means.index.values ), fontsize = 8 )
+    plt.savefig( test_dir + "/feature_validation.bootstrap_plot." + model + ".png" )
+    errw( " Done!\n" )
+
+    errw( "\t\tCompleted writing data and plots to disk!\n" )
 
     errw( "\tCompleted validation!\n" )
 
@@ -918,7 +1072,7 @@ def train_models( args ):
     ## verify specified models
     check_models = args.models.split( ',' )
     for model in check_models:
-        if model not in models_to_class.keys():
+        if model not in model_to_class.keys():
             sys.exit( "ERROR! User specified invalid model: " + model )
 
     ## verify specified features
@@ -1003,7 +1157,7 @@ def train_models( args ):
                 args.aliscore_homology_dir,
                 ortho_groups,
                 args.threads,
-                "H",
+                'H',
                 args.aliscore_path,
                 )
 
@@ -1026,15 +1180,22 @@ def train_models( args ):
                 args.featurized_clusters_dir + "/featurized_data.pickle",
                 data
                 )
+        if args.featurize_only:
+            errw( "Featurizing dataset successful, quitting because --featurize_only set.\n" )
+            sys.exit()
     else:
         data = load_featurized_data( args.featurized_data )
 
     # train models
     if args.test:
         dir_check( args.test_dir )
-        run_validation( args.test_dir, data )
-    else:
-        models = create_trained_models( args.models, args.features, data, args.threads )
+        run_validation( args.test_dir, data, args.threads )
+
+        if args.test_only:
+            errw( "Model and feature validation successful, quitting because --test_only set.\n" )
+            sys.exit()
+
+    models = create_trained_models( args.models, args.features, data, args.threads )
 
     # save models
     save_models( args.save_prefix, args.models, args.features, models )
@@ -1059,7 +1220,7 @@ def load_models( models_prefix ):
 
     return models
 
-
+# TODO: finish this
 def classify_clusters( args ):
     errw( "Classifying clusters!\n" )
 
@@ -1297,7 +1458,7 @@ if __name__ == "__main__":
             )
 
     train_group_skip = sp_train.add_argument_group( "Skip parts of the pipeline", "If you've already completed parts of the pipeline you can skip steps with these flags. Note: each flag requires you specify an output directory for the step you're skipping. Steps are listed in order, if you skip a step, all steps before it are skipped as well." )
-    train_group_skip.add_argument( "--skip_segregate",
+    '''train_group_skip.add_argument( "--skip_segregate",
             type = str,
             help = "Skip segregating the fasta file from OrthoDB into separate fasta files for each group. Provide the path to the directory that contains all the segregated ortho groups in fasta format."
             )
@@ -1312,10 +1473,20 @@ if __name__ == "__main__":
     train_group_skip.add_argument( "--skip_align_nh",
             type = str,
             help = "Skip the alignment process for each false-positive homoloy clusters. Provide the path to the directory with all fasle-positive homology cluster alignments in fasta format."
+            )'''
+    train_group_skip.add_argument( "--featurize_only",
+            default = False,
+            action = "store_true",
+            help = "Only featurize the data, no testing or model training."
             )
     train_group_skip.add_argument( "--featurized_data",
             type = str,
             help = "Skip all steps and use the pickled, featurized data."
+            )
+    train_group_skip.add_argument( "--test_only",
+            default = False,
+            action = "store_true",
+            help = "Only perform validation of models and features, do not train final models. If --featurized_data is not set, it will featurize your data and a OrthoDB fasta is required."
             )
 
     train_group_save = sp_train.add_argument_group( "Saving", "Options for saving your trained models." )
@@ -1336,7 +1507,7 @@ if __name__ == "__main__":
             default = "tests",
             help = "Directory to store output of running tests."
             )
-
+    
     args = parser.parse_args()
 
     main( args )

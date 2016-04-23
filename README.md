@@ -102,24 +102,13 @@ Each flag requires you to pass in a path to the directory containing the expecte
 The skip flags are:
 
 ```
-  --skip_segregate SKIP_SEGREGATE
-                        Skip segregating the fasta file from OrthoDB into
-                        separate fasta files for each group. Provide the path
-                        to the directory that contains all the segregated
-                        ortho groups in fasta format.
-  --skip_align_orthodb SKIP_ALIGN_ORTHODB
-                        Skip alignment process for each OrthoDB orthology
-                        group. Provide the path to the directory with the
-                        OrthBD alignments in fasta format.
-  --skip_generate_nh SKIP_GENERATE_NH
-                        Skip the generation process of false-positive homology
-                        clusters. Provide the path to the directory with all
-                        false-positive homology clusters in fasta format.
-  --skip_align_nh SKIP_ALIGN_NH
-                        Skip the alignment process for each false-positive
-                        homoloy clusters. Provide the path to the directory
-                        with all fasle-positive homology cluster alignments in
-                        fasta format.
+  --featurize_only      Only featurize the data, no testing or model training.
+  --featurized_data FEATURIZED_DATA
+                        Skip all steps and use the pickled, featurized data.
+  --test_only           Only perform validation of models and features, do not
+                        train final models. If --featurized_data is not set,
+                        it will featurize your data and a OrthoDB fasta is
+                        required.
 ```
 
 ## Citing this package

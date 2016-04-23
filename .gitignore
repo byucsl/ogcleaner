@@ -38,3 +38,5 @@ models/
 tests/
 data/5000.fasta
 data/15000.fasta
+
+trained_model.*
