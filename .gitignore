@@ -35,3 +35,6 @@ classify_aliscores/
 
 logs/
 models/
+tests/
+data/5000.fasta
+data/15000.fasta

@@ -16,6 +16,10 @@ from sklearn.naive_bayes import MultinomialNB
 from sklearn.ensemble import BaggingClassifier
 from sklearn.cross_validation import train_test_split
 from sklearn.metrics import accuracy_score
+import matplotlib.pyplot as plt
+import math
+from random import shuffle
+
 
 # global variables
 version = "0.1a"
@@ -26,7 +30,7 @@ default_mafft_path = str( base_path ) + "/lib/mafft_bin/mafft"
 default_paml_path = str( base_path ) + "/lib/paml_bin/evolverRandomTree"
 default_seqgen_path = str( base_path ) + "/lib/seq-gen_bin/seq-gen"
 default_aliscore_path = str( base_path ) + "/lib/Aliscore_v.2.0/Aliscore.02.2.pl"
-default_seqgen_opts = "-mWAG -k1 -i0 -n1"
+default_seqgen_opts = "-mWAG -k1 -n1"
 
 # amino acid properties
 # courtesy of Nick Jensen, thanks Nick!
@@ -68,6 +72,7 @@ aa_hydrophobic = [ 'W', 'I', 'Y', 'F', 'V', 'M', 'L', 'A' ]
 available_models = "svm,neural_network,random_forest,naive_bayes,logistic_regression"
 available_features = "aliscore,length,num_seqs,num_gaps,num_amino_acids,range,amino_acid_charged,amino_acid_uncharged,amino_acid_special,amino_acid_hydrophobic"
 
+default_bootstrap_percentages = "1,2,3,4,5,6,7,8,9,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100"
 
 models_to_class = {
         "svm" : SVC,
@@ -321,7 +326,7 @@ def merge_all_trees( tree_file_paths ):
     return all_trees
 
 
-def evolve_seq( id, output_dir, header, seq, tree ):
+def evolve_seq( id, invariable_sites, output_dir, header, seq, tree ):
     seq_id = header[ 1 : ].split()[ 0 ].split( ':' )[ 1 ]
     seqgen_input = "1\t" + str( len( seq ) ) + "\n" + seq_id + "\t" + seq + "\n1\n" + tree
     #print seqgen_input + "\n"
@@ -329,15 +334,17 @@ def evolve_seq( id, output_dir, header, seq, tree ):
     output_path = output_dir + "/" + id + "/" + seq_id + ".evolved"
 
     with open( output_path, 'w' ) as fh, open( logs_dir + "/" + id + "." + seq_id + ".seqgen_out", 'w' ) as stderr_out:
-        p = Popen( [ default_seqgen_path ] + seqgen_opts, stdout = fh, stdin = PIPE, stderr = stderr_out )
+        p = Popen( [ default_seqgen_path ] + seqgen_opts + [ "-i" + str( invariable_sites ) ], stdout = fh, stdin = PIPE, stderr = stderr_out )
         #fh.write( "\n" )
         p.communicate( input = seqgen_input )
         p.wait()
 
 
 def generate_evolved_sequence( item ):
+#def generate_evolved_sequence( ( id, cluster_path, invariable_sites ) ):
     id = item[ 0 ]
     cluster_path = item[ 1 ]
+    invariable_sites = item[ 2 ]
     new_cluster = []
 
     dir_check( evolved_seqs_dir + "/" + id )
@@ -373,10 +380,10 @@ def generate_evolved_sequence( item ):
     for idx, full_seq in enumerate( zip( headers, seqs ) ):
         header = full_seq[ 0 ]
         seq = full_seq[ 1 ]
-        evolve_seq( id, evolved_seqs_dir, header, seq, trees[ tree_indices[ idx ] ] )
+        evolve_seq( id, invariable_sites, evolved_seqs_dir, header, seq, trees[ tree_indices[ idx ] ] )
 
     with lock:
-        errw( "\t\t\tEvolved cluster " + id + "\n" )
+        errw( "\t\t\tEvolved cluster " + id + " with " + str( invariable_sites * 100 ) + "% invariable sites\n" )
 
 
 def generate_evolved_sequences( nh_groups_dir, all_trees, homology_cluster_paths, threads, seqgen_path, seqgen_opts, logs_dir, evolved_seqs_dir ):
@@ -384,8 +391,17 @@ def generate_evolved_sequences( nh_groups_dir, all_trees, homology_cluster_paths
 
     # prep tasks
     #tasks = [ x for x in homology_cluster_paths ]
-    tasks = homology_cluster_paths
-    #print homology_cluster_paths
+    invariable_sites = [ 0.0 ] * ( len( homology_cluster_paths ) / 3 )
+    invariable_sites += [ 0.25 ] * ( len( homology_cluster_paths ) / 3 )
+    invariable_sites += [ 0.5 ] * ( len( homology_cluster_paths ) - len( invariable_sites ) )
+
+    shuffle( invariable_sites )
+
+    assert len( invariable_sites ) == len( homology_cluster_paths )
+
+    ids = [ x[ 0 ] for x in homology_cluster_paths ]
+    file_paths = [ x[ 1 ] for x in homology_cluster_paths ]
+    tasks = zip( ids, file_paths, invariable_sites )
 
     # distribute tasks
     lock = Lock()
@@ -648,15 +664,20 @@ def featurize_clusters( cluster_dir, working_dir, cluster_ids, threads, label, a
     return featurized_clusters
 
 
-def save_featurized_dataset( dest_path, data ):
+def save_featurized_dataset( dest_path, readable_data, pickle_dest_path, pd_data ):
     errw( "\t\tSaving featurized data set to " + dest_path + "..." )
     #print data
     with open( dest_path, 'w' ) as fh:
-        for item in data:
+        for item in readable_data:
             #print item
             fh.write( ", ".join( map( str, item ) ) + "\n" )
+
     errw( " Done!\n" )
 
+    errw( "\t\tPickling featurized data set to " + pickle_dest_path + "..." )
+    with open( pickle_dest_path, "wb" ) as fh:
+        pickle.dump( pd_data, fh )
+    errw( " Done!\n" )
 
 def train_model( model ):
     cur_model = models_to_class[ model ]()
@@ -668,7 +689,17 @@ def train_model( model ):
     return cur_model
 
 
-def train( models, features, data, threads ):
+def format_data_for_training( data ):
+    # prep the data
+    ## turn the data into a pandas dataframe with appropriate labels
+    columns = available_features.split( ',' )
+    columns.append( "class" )
+    data = pd.DataFrame( data, columns = columns )
+
+    return data
+
+
+def create_trained_models( models, features, data, threads ):
     errw( "\tTraining models\n" )
     # prep the models
     models = models.split( ',' )
@@ -676,12 +707,6 @@ def train( models, features, data, threads ):
     # prep features
     # needed for data prep
     features = features.split( ',' )
-
-    # prep the data
-    ## turn the data into a pandas dataframe with appropriate labels
-    columns = available_features.split( ',' )
-    columns.append( "class" )
-    data = pd.DataFrame( data, columns = columns )
 
     ## separate into features and labels
     x = data[ features ]
@@ -724,7 +749,7 @@ def train( models, features, data, threads ):
     #    errw( "\t\tTraining " + model + "..." )
     #    trained_models.append( models_to_class[ model ]() )
     #    trained_models[ -1 ].fit( x, y )
-    #    errw( "Done!\n" )
+    #    errw( " Done!\n" )
 
     if meta:
         # train the meta classifier
@@ -764,10 +789,92 @@ def train( models, features, data, threads ):
     return models
 
 
-#TODO: implement
-def run_validation():
-    pass
+# These are tests that will help verify results of the models
+def run_validation( test_dir, data ):
+    errw( "\tRunning validation...\n" )
 
+    boot_percs = map( int, default_bootstrap_percentages.split( ',' ) )
+
+    # set up features
+    features = available_features.split( ',' )
+
+    # first, split the data into train and test
+    train, test = train_test_split( data, test_size = 0.2 )
+
+    # set up test data
+    x_test = test[ features ]
+    y_test = test[ "class" ]
+
+    ## check inidivudal model performance with bootstrap analysis
+    ## this is run for 100 replicates
+    errw( "\t\tValidate models...\n" )
+    all_percs = dict()
+    for model_name, model_class in models_to_class.iteritems():
+        errw( "\t\t\tValidating " + model_name + "..." )
+        model_acc = []
+        model = model_class()
+
+        for boot_perc in boot_percs:
+            boot_perc_acc = []
+            num_instances = int( math.ceil( ( float( boot_perc ) / 100 ) * len( train ) ) )
+
+            #print "number of instances: " + str( num_instances )
+            
+            for i in range( 100 ):
+                # get the sub-sampled data
+                sub_train = train.sample( n = num_instances, replace = True )
+                x_train = sub_train[ features ]
+                y_train = sub_train[ "class" ]
+
+                try:
+                    model.fit( x_train, y_train )
+                    preds = model.predict( x_test )
+                    acc = accuracy_score( y_test, preds )
+
+                    boot_perc_acc.append( acc )
+                except ValueError:
+                    boot_perc_acc.append( 0. )
+
+            model_acc.append( boot_perc_acc )
+        errw( " Done!\n" )
+        formatted_percs = pd.DataFrame( model_acc ).transpose()
+        formatted_percs.columns = boot_percs
+        all_percs[ model_name ] = formatted_percs
+    errw( "\t\tCompleted model validation\n" )
+
+    errw( "\t\tWriting accuracies and plots to disk...\n" )
+    # create plots for each model
+    for model, percs in all_percs.iteritems():
+        errw( "\t\t\tWriting " + model + " accuracy values to disk..." )
+
+        with open( test_dir + "/bootstrap_values." + model + ".csv", 'w' ) as fh:
+            fh.write( percs.to_csv() )
+
+        errw( " Done!\n" )
+
+        errw( "\t\t\tGenerating plot for " + model + "..." )
+
+        avgs = percs.mean()
+        errs = percs.std()
+
+        #print "averages"
+        #print avgs
+
+        fig, ax = plt.subplots()
+        avgs.plot.line( yerr = errs, ax = ax )
+        plt.savefig( test_dir + "/bootstrap_plot." + model + ".png" )
+
+        errw( " Done!\n" )
+    errw( "\t\tCompleted writing data and plots to disk!\n" )
+
+    ## check individual feature performance using the metaclassifier
+    ## this is run for 100 replicates
+
+    errw( "\tCompleted validation!\n" )
+
+
+def load_featurized_data( file_path ):
+    return pickle.load( open( file_path, "rb" ) )
 
 def save_models( save_prefix, models, features, trained_models ):
     errw( "\tSaving models..." )
@@ -781,13 +888,14 @@ def save_models( save_prefix, models, features, trained_models ):
     with open( save_prefix + ".models", 'w' ) as fh:
         fh.write( models )
 
-    errw( "Done!\n" )
+    errw( " Done!\n" )
 
 
 def errw( text ):
     sys.stderr.write( text )
 
 
+# return true if it needs to compute, return false if directory already exists and data should be used
 def dir_check( dir_path ):
     # check if the output directory exists
     if not os.path.exists( dir_path ):
@@ -797,6 +905,9 @@ def dir_check( dir_path ):
             errw( "Created directory " + dir_path + "\n" )
         else:
             sys.exit( "ERROR! Could not create the directory " + dir_path + ". Aborting!" )
+
+        return True
+    return False
 
 
 def train_models( args ):
@@ -817,97 +928,113 @@ def train_models( args ):
         if feat not in feats_avail:
             sys.exit( "ERROR! User specified invalid feature: " + feat )
 
-    ## check if the output directory exists
-    dir_check( args.orthodb_groups_dir )
-    dir_check( args.nh_groups_dir )
-    dir_check( args.paml_configs_dir )
-    dir_check( args.logs_dir )
-    dir_check( args.aligned_homology_dir )
-    dir_check( args.aligned_nh_dir )
-    dir_check( args.paml_trees_dir )
-    dir_check( args.evolved_seqs_dir )
-    dir_check( args.featurized_clusters_dir )
-    dir_check( args.aliscore_homology_dir )
-    dir_check( args.aliscore_nh_dir )
-    
-    # end verify parameters
+    if not args.featurized_data:
 
-    if args.seed != -1:
-        errw( "Setting random number seed to: " + str( args.seed ) + "\n" )
-        np.random.seed( args.seed )
+        if not args.orthodb_fasta:
+            sys.exit( "ERROR! User did not provide featurized dataset or OrthoDB fasta file! Abort!" )
 
-    errw( "Beginning...\n" )
+        ## check if the output directory exists
+        dir_check( args.orthodb_groups_dir )
+        dir_check( args.nh_groups_dir )
+        dir_check( args.paml_configs_dir )
+        dir_check( args.logs_dir )
+        dir_check( args.aligned_homology_dir )
+        dir_check( args.aligned_nh_dir )
+        dir_check( args.paml_trees_dir )
+        dir_check( args.evolved_seqs_dir )
+        dir_check( args.featurized_clusters_dir )
+        dir_check( args.aliscore_homology_dir )
+        dir_check( args.aliscore_nh_dir )
+        
+        # end verify parameters
 
-    ortho_groups = segregate_orthodb_groups( args.orthodb_fasta, args.orthodb_groups_dir )
+        if args.seed != -1:
+            errw( "Setting random number seed to: " + str( args.seed ) + "\n" )
+            np.random.seed( args.seed )
 
-    # align the orthodb clusters
-    align_clusters(
-            args.aligner_path,
-            args.aligner_options,
-            args.orthodb_groups_dir,
-            ortho_groups,
-            args.aligned_homology_dir,
-            args.threads,
-            args.logs_dir
-            )
+        errw( "Beginning...\n" )
 
-    # process the seqgen_opts
-    args.seqgen_opts = args.seqgen_opts.split()
+        ortho_groups = segregate_orthodb_groups( args.orthodb_fasta, args.orthodb_groups_dir )
 
-    # non-homology cluster generation
-    nh_group_paths = [ ( x, args.orthodb_groups_dir + "/" + x ) for x in ortho_groups ]
-    nh_groups = generate_nh_clusters(
-            nh_group_paths,
-            args.evolved_seqs_dir,
-            args.nh_groups_dir,
-            args.paml_configs_dir,
-            args.paml_trees_dir,
-            args.threads,
-            args.paml_path,
-            args.logs_dir,
-            args.seqgen_path,
-            args.seqgen_opts
-            )
+        # align the orthodb clusters
+        align_clusters(
+                args.aligner_path,
+                args.aligner_options,
+                args.orthodb_groups_dir,
+                ortho_groups,
+                args.aligned_homology_dir,
+                args.threads,
+                args.logs_dir
+                )
 
-    # align the non-homology clusters
-    align_clusters(
-            args.aligner_path,
-            args.aligner_options,
-            args.nh_groups_dir,
-            nh_groups,
-            args.aligned_nh_dir,
-            args.threads,
-            args.logs_dir
-            )
+        # process the seqgen_opts
+        args.seqgen_opts = args.seqgen_opts.split()
 
-    # featurize datasets
-    ## featurize orthodb groups
-    h_featurized = featurize_clusters(
-            args.aligned_homology_dir,
-            args.aliscore_homology_dir,
-            ortho_groups,
-            args.threads,
-            "H",
-            args.aliscore_path,
-            )
+        # non-homology cluster generation
+        nh_group_paths = [ ( x, args.orthodb_groups_dir + "/" + x ) for x in ortho_groups ]
+        nh_groups = generate_nh_clusters(
+                nh_group_paths,
+                args.evolved_seqs_dir,
+                args.nh_groups_dir,
+                args.paml_configs_dir,
+                args.paml_trees_dir,
+                args.threads,
+                args.paml_path,
+                args.logs_dir,
+                args.seqgen_path,
+                args.seqgen_opts
+                )
 
-    ## featurize nh groups
-    nh_featurized = featurize_clusters(
-            args.aligned_nh_dir,
-            args.aliscore_nh_dir,
-            nh_groups, args.threads,
-            "NH",
-            args.aliscore_path,
-            )
+        # align the non-homology clusters
+        align_clusters(
+                args.aligner_path,
+                args.aligner_options,
+                args.nh_groups_dir,
+                nh_groups,
+                args.aligned_nh_dir,
+                args.threads,
+                args.logs_dir
+                )
 
-    ## concatenate the featurized tables into a single file and write to disk
-    save_featurized_dataset( args.featurized_clusters_dir + "/featurized_data.txt", h_featurized + nh_featurized )
+        # featurize datasets
+        ## featurize orthodb groups
+        h_featurized = featurize_clusters(
+                args.aligned_homology_dir,
+                args.aliscore_homology_dir,
+                ortho_groups,
+                args.threads,
+                "H",
+                args.aliscore_path,
+                )
+
+        ## featurize nh groups
+        nh_featurized = featurize_clusters(
+                args.aligned_nh_dir,
+                args.aliscore_nh_dir,
+                nh_groups, args.threads,
+                "NH",
+                args.aliscore_path,
+                )
+
+        ## format data with correct column headers
+        data = format_data_for_training( h_featurized + nh_featurized  )
+
+        ## concatenate the featurized tables into a single file and write to disk
+        save_featurized_dataset(
+                args.featurized_clusters_dir + "/featurized_data.txt",
+                h_featurized + nh_featurized,
+                args.featurized_clusters_dir + "/featurized_data.pickle",
+                data
+                )
+    else:
+        data = load_featurized_data( args.featurized_data )
 
     # train models
     if args.test:
-        run_validation()
+        dir_check( args.test_dir )
+        run_validation( args.test_dir, data )
     else:
-        models = train( args.models, args.features, h_featurized + nh_featurized, args.threads )
+        models = create_trained_models( args.models, args.features, data, args.threads )
 
     # save models
     save_models( args.save_prefix, args.models, args.features, models )
@@ -919,16 +1046,16 @@ def parse_cluster_paths( file_path ):
     with open( file_path ) as fh:
         for line in fh:
             cluster_paths.append( line.strip() )
-    wrre( "Done!\n" )
+    wrre( " Done!\n" )
 
     return cluster_paths
 
 
 def load_models( models_prefix ):
     errw( "\tLoading models..." )
-    with open( models_prefix + ".trained_models" ) as fh:
+    with open( models_prefix + ".trained_models", "rb" ) as fh:
         models = pickle.load( fh )
-    errw( "Done!\n" )
+    errw( " Done!\n" )
 
     return models
 
@@ -1047,7 +1174,6 @@ if __name__ == "__main__":
     group_in = sp_train.add_argument_group( "Input", "Input files to run the program." )
     group_in.add_argument( "--orthodb_fasta",
             type = str,
-            required = True,
             help = "Fasta file downloaded from orthodb."
             )
 
@@ -1187,6 +1313,10 @@ if __name__ == "__main__":
             type = str,
             help = "Skip the alignment process for each false-positive homoloy clusters. Provide the path to the directory with all fasle-positive homology cluster alignments in fasta format."
             )
+    train_group_skip.add_argument( "--featurized_data",
+            type = str,
+            help = "Skip all steps and use the pickled, featurized data."
+            )
 
     train_group_save = sp_train.add_argument_group( "Saving", "Options for saving your trained models." )
     train_group_save.add_argument( "--save_prefix",
@@ -1200,6 +1330,11 @@ if __name__ == "__main__":
             default = False,
             action = "store_true",
             help = "Do boostrapping analysis, tests, etc. to see how well your trained models are performing."
+            )
+    train_group_test.add_argument( "--test_dir",
+            type = str,
+            default = "tests",
+            help = "Directory to store output of running tests."
             )
 
     args = parser.parse_args()
