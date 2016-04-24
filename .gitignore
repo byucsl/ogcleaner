@@ -40,3 +40,6 @@ data/5000.fasta
 data/15000.fasta
 
 trained_model.*
+
+scripts/*
+data/universal.singlecopy0.8.fasta

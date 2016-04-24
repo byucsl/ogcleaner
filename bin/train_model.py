@@ -502,15 +502,27 @@ def create_evolved_cluster( item ):
     dir_path = item[ 1 ]
     cluster_seqs = []
 
+    #with lock:
+    #    print group_id, dir_path
+
     for dirname, dirnames, filenames in os.walk( dir_path ):
         for filename in filenames:
             full_path = os.path.join( dirname, filename )
+            print "\t", filename
+
+            if os.stat( full_path ).st_size == 0:
+                continue
+
             with open( full_path ) as fh:
                 spec_seqs = []
                 species_name = filename[ : filename.rfind( '.' ) ]
                 fh.next()
                 for line in fh:
                     spec_seqs.append( line.strip().split()[ 1 ] )
+                if len( spec_seqs ) == 0:
+                    print "\t\tnothing in file"
+                    continue
+
                 rand_seq = spec_seqs[ np.random.randint( len( spec_seqs ) - 1 ) ]
                 cluster_seqs.append( ( species_name, rand_seq ) )
 
@@ -788,7 +800,7 @@ def create_trained_models( models, features, data, threads ):
     x_train, x_test, y_train, y_test = train_test_split( x, y, test_size = 0.2 )
 
     errw( "\t\tTrain size: " + str( len( x_train ) ) + " instances\n" )
-    errw( "\t\tTest size: " + str( len( x_test ) ) + "instances\n" )
+    errw( "\t\tTest size: " + str( len( x_test ) ) + " instances\n" )
 
     trained_models = []
     if len( models ) > 1:
@@ -916,6 +928,10 @@ def run_validation( test_dir, data, threads ):
         errs.columns = [ "Train", "Test" ]
 
         fig, ax = plt.subplots()
+        #leg = plt.legend( fontsize = 8 )
+        #leg = plt.gca().get_legend()
+        #ltext  = leg.get_texts()
+        #plt.setp( ltext, fontsize = 8 )
         fig.set_size_inches( 12, 8, forward = True )
         plt.title( model + " accuracy" )
         plt.ylim( 0.0, 1.0 )
@@ -925,6 +941,7 @@ def run_validation( test_dir, data, threads ):
         plt.fill_between( avgs.index.values, avgs[ "Train" ] - errs[ "Train" ], avgs[ "Train" ] + errs[ "Train" ], facecolor = 'blue', alpha = 0.2 )
         plt.fill_between( avgs.index.values, avgs[ "Test" ] - errs[ "Test" ], avgs[ "Test" ] + errs[ "Test" ], facecolor = 'red', alpha = 0.2 )
         plt.xticks( avgs.index.values, map( str, avgs.index.values ), fontsize = 8 )
+        leg = plt.legend( fontsize = 8 )
         plt.savefig( test_dir + "/model_validation.bootstrap_plot." + model + ".png" )
 
         errw( " Done!\n" )
@@ -1008,6 +1025,9 @@ def run_validation( test_dir, data, threads ):
     colors = [ "blue", "red", "yellow", "orange", "green", "black", "cyan", "gray", "purple", "pink" ]
 
     fig, ax = plt.subplots()
+    #leg = plt.gca().get_legend()
+    #ltext  = leg.get_texts()
+    #plt.setp( ltext, fontsize = 8 )
     fig.set_size_inches( 12, 8, forward = True )
     plt.title( model + " test set accuracy per feature" )
     plt.ylim( 0.0, 1.0 )
@@ -1019,6 +1039,7 @@ def run_validation( test_dir, data, threads ):
         plt.fill_between( all_means.index.values, all_means[ feature ] - errs, all_means[ feature ] + errs, facecolor = colors[ idx ], alpha = 0.1 )
 
     plt.xticks( all_means.index.values, map( str, all_means.index.values ), fontsize = 8 )
+    leg = plt.legend( fontsize = 8 )
     plt.savefig( test_dir + "/feature_validation.bootstrap_plot." + model + ".png" )
     errw( " Done!\n" )
 
@@ -1109,6 +1130,7 @@ def train_models( args ):
         errw( "Beginning...\n" )
 
         ortho_groups = segregate_orthodb_groups( args.orthodb_fasta, args.orthodb_groups_dir )
+        errw( "Number of groups: " + str( len( ortho_groups ) ) + "\n" )
 
         # align the orthodb clusters
         align_clusters(

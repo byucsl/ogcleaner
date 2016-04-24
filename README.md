@@ -66,8 +66,9 @@ make seq-gen
 
 ```bash
 # Get a dataset from OrthoDB.
-# This can be done via the OrthoDB website, or you can use wget if you want to query their APIs directly
-wget "http://orthodb.org/fasta?query=&level=6656&species=6656&universal=1&singlecopy=0.9"
+# This can be done via the OrthoDB website, or you can use wget if you want to query their APIs directly as shownn below
+# this file is written to disk with the name 'universal.singlecopy0.9.fasta' as seen in the wget options
+wget -O universal.singlecopy0.9.fasta "http://orthodb.org/fasta?query=&level=6656&species=6656&universal=1&singlecopy=0.9"
 
 # Run the model training script on the included test dataset (a very small subset of OrthoDB data)
 # This script will take care of everything for you after you have a dataset from OrthoDB, includeing:
