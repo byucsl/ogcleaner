@@ -46,3 +46,5 @@ data/test/*
 slurm-*
 working/*
 data/universal.singlecopy0.8.fasta
+
+validation/notebooks/.ipynb_checkpoints/
