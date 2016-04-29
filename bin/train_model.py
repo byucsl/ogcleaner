@@ -1103,6 +1103,10 @@ def train_models( args ):
         if feat not in feats_avail:
             sys.exit( "ERROR! User specified invalid feature: " + feat )
 
+    if args.test_only:
+        args.test = True
+    # end verify parameters
+    
     if not args.featurized_data:
 
         if not args.orthodb_fasta:
@@ -1119,9 +1123,7 @@ def train_models( args ):
         dir_check( args.evolved_seqs_dir )
         dir_check( args.featurized_clusters_dir )
         dir_check( args.aliscore_homology_dir )
-        dir_check( args.aliscore_nh_dir )
-        
-        # end verify parameters
+        dir_check( args.aliscore_nh_dir )    
 
         if args.seed != -1:
             errw( "Setting random number seed to: " + str( args.seed ) + "\n" )
@@ -1508,7 +1510,7 @@ if __name__ == "__main__":
     train_group_skip.add_argument( "--test_only",
             default = False,
             action = "store_true",
-            help = "Only perform validation of models and features, do not train final models. If --featurized_data is not set, it will featurize your data and a OrthoDB fasta is required."
+            help = "Only perform validation of models and features, do not train final models. If --featurized_data is not set, it will featurize your data and a OrthoDB fasta is required. This flag will turn on --test."
             )
 
     train_group_save = sp_train.add_argument_group( "Saving", "Options for saving your trained models." )
