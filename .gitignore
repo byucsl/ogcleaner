@@ -42,4 +42,7 @@ data/15000.fasta
 trained_model.*
 
 scripts/*
+data/test/*
+slurm-*
+working/*
 data/universal.singlecopy0.8.fasta

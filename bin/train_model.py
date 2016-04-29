@@ -934,7 +934,7 @@ def run_validation( test_dir, data, threads ):
         #plt.setp( ltext, fontsize = 8 )
         fig.set_size_inches( 12, 8, forward = True )
         plt.title( model + " accuracy" )
-        plt.ylim( 0.0, 1.0 )
+        plt.ylim( 0.5, 1.0 )
         plt.xlabel( "% of total training set" )
         plt.ylabel( "% accuracy" )
         avgs.plot.line( ax = ax, color = [ 'b', 'r' ] )
