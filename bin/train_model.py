@@ -1152,6 +1152,9 @@ def train_models( args ):
                 args.logs_dir
                 )
 
+        if args.clean:
+            clean_dir( args.logs_dir )
+
         # process the seqgen_opts
         args.seqgen_opts = args.seqgen_opts.split()
 
@@ -1170,6 +1173,9 @@ def train_models( args ):
                 args.seqgen_opts
                 )
 
+        if args.clean:
+            clean_dir( args.logs_dir )
+
         # align the non-homology clusters
         align_clusters(
                 args.aligner_path,
@@ -1180,6 +1186,9 @@ def train_models( args ):
                 args.threads,
                 args.logs_dir
                 )
+
+        if args.clean:
+            clean_dir( args.logs_dir )
 
         # featurize datasets
         ## featurize orthodb groups
@@ -1192,6 +1201,9 @@ def train_models( args ):
                 args.aliscore_path,
                 )
 
+        if args.clean:
+            clean_dir( args.logs_dir )
+
         ## featurize nh groups
         nh_featurized = featurize_clusters(
                 args.aligned_nh_dir,
@@ -1201,8 +1213,14 @@ def train_models( args ):
                 args.aliscore_path,
                 )
 
+        if args.clean:
+            clean_dir( args.logs_dir )
+
         ## format data with correct column headers
         data = format_data_for_training( h_featurized + nh_featurized  )
+
+        if args.clean:
+            clean_dir( args.logs_dir )
 
         ## concatenate the featurized tables into a single file and write to disk
         save_featurized_dataset(
@@ -1211,6 +1229,10 @@ def train_models( args ):
                 args.featurized_clusters_dir + "/featurized_data.pickle",
                 data
                 )
+
+        if args.clean:
+            clean_dir( args.logs_dir )
+
         if args.featurize_only:
             errw( "Featurizing dataset successful, quitting because --featurize_only set.\n" )
             sys.exit()
