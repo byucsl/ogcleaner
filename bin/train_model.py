@@ -36,7 +36,7 @@ class Metaclassifier:
         model_names = a python list of model names, the model names should correspond to the used models
         '''
         self.model_names = model_names
-        self.models = [ model_to_class[ x ]() for x in model_names ]
+        self.models = [ model_to_class[ x ]( **( model_params[ x ] ) ) for x in model_names ]
         self.skip_models = [ 0 ] * len( self.models )
         self.models.append( MLPClassifier() )
 
@@ -147,10 +147,18 @@ model_to_class = {
         "metaclassifier" : Metaclassifier
         }
 
+model_params = {
+        "svm" : {
+            "kernel" : "poly",
+            "cache_size" = 4000
+            }
+        }
 
-def share_model_to_class( model_to_class_ ):
-    global model_to_class
+
+def share_models( model_to_class_, model_params_ ):
+    global model_to_class, model_params
     model_to_class = model_to_class_
+    model_params = model_params_
 
 
 def init_child(lock_):
@@ -762,7 +770,7 @@ def save_featurized_dataset( dest_path, readable_data, pickle_dest_path, pd_data
     errw( " Done!\n" )
 
 def train_model( model ):
-    cur_model = model_to_class[ model ]()
+    cur_model = model_to_class[ model ]( **( model_params[ model ] ) )
     cur_model.fit( x, y )
 
     with lock:
@@ -826,7 +834,7 @@ def train_return_acc( item ):
     y_train = item[ 1 ]
     x_test = item[ 2 ]
     y_test = item[ 3 ]
-    model = model_to_class[ item[ 4 ] ]()
+    model = model_to_class[ item[ 4 ] ]( **( model_params[ item[ 4 ] ) )
 
     with warnings.catch_warnings():
         warnings.simplefilter( "ignore" )
@@ -889,17 +897,11 @@ def run_validation( test_dir, data, threads ):
                 tasks_train.append( ( x_train, y_train, x_train, y_train, model_name ) )
                 tasks_test.append( ( x_train, y_train, x_test, y_test, model_name ) )
 
-            pool = Pool( threads, initializer = share_model_to_class, initargs = ( model_to_class, ) )
+            pool = Pool( threads, initializer = share_model, initargs = ( model_to_class, model_params ) )
             boot_perc_acc = pool.map( train_return_acc, tasks_test )
             pool.close()
             pool.join()
             model_acc_test.append( boot_perc_acc )
-
-            pool = Pool( threads, initializer = share_model_to_class, initargs = ( model_to_class, ) )
-            boot_perc_acc = pool.map( train_return_acc, tasks_train )
-            pool.close()
-            pool.join()
-            model_acc_train.append( boot_perc_acc )
 
         errw( " Done!\n" )
         formatted_percs = pd.DataFrame( model_acc_test ).transpose()
@@ -985,7 +987,7 @@ def run_validation( test_dir, data, threads ):
                 #preds = model.predict( x_test[ feature ].reshape(-1, 1) )
                 #acc = accuracy_score( y_test, preds )
                 #boot_perc_acc.append( acc )
-            pool = Pool( threads, initializer = share_model_to_class, initargs = ( model_to_class, ) )
+            pool = Pool( threads, initializer = share_models, initargs = ( model_to_class, model_params ) )
             boot_perc_acc = pool.map( train_return_acc, tasks )
             pool.close()
             pool.join()
