@@ -1085,6 +1085,10 @@ def dir_check( dir_path ):
     return False
 
 
+def clean_dir( dir ):
+    call( [ "rm", "-rf", dir + "/*" ] )
+
+
 def train_models( args ):
     errw( "Aligner: " + args.aligner_path + "\n" )
     errw( "Aligner args: " + args.aligner_options + "\n" )
@@ -1133,6 +1137,9 @@ def train_models( args ):
 
         ortho_groups = segregate_orthodb_groups( args.orthodb_fasta, args.orthodb_groups_dir )
         errw( "Number of groups: " + str( len( ortho_groups ) ) + "\n" )
+
+        if args.clean:
+            clean_dir( args.logs_dir )
 
         # align the orthodb clusters
         align_clusters(
@@ -1532,6 +1539,12 @@ if __name__ == "__main__":
             help = "Directory to store output of running tests."
             )
     
+    train_group_clean = sp_train.add_argument_group( "Cleaning", "There are many intermediary files that are generated while running this program, set this flag to clean as you go." )
+    train_group_clean.add_argument( "--clean",
+            default = False,
+            action = "store_true",
+            help = "Set this flag to delete temporary files as you go."
+            )
     args = parser.parse_args()
 
     main( args )
