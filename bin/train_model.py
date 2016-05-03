@@ -8,21 +8,30 @@ from subprocess import call, Popen, PIPE
 from pathlib import Path
 from multiprocessing import Pool, Lock
 import pandas as pd
+
 from sklearn.linear_model import LogisticRegression
 from sklearn.neural_network import MLPClassifier
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.ensemble import BaggingClassifier
+
+from sklearn.preprocessing import scale
 from sklearn.cross_validation import train_test_split
 from sklearn.metrics import accuracy_score
+
 import matplotlib.pyplot as plt
 import math, warnings
+
+from sklearn.utils import shuffle as skshuffle
+
 from random import shuffle
 
 
 available_models = "svm,neural_network,random_forest,naive_bayes,logistic_regression"
-available_features = "aliscore,length,num_seqs,num_gaps,num_amino_acids,range,amino_acid_charged,amino_acid_uncharged,amino_acid_special,amino_acid_hydrophobic"
+default_models = "neural_network"
+available_features_str = "aliscore,length,num_seqs,num_gaps,num_amino_acids,range,amino_acid_charged,amino_acid_uncharged,amino_acid_special,amino_acid_hydrophobic"
+available_features = available_features_str.split( ',' )
 
 
 # our own meta-classifier
@@ -31,16 +40,18 @@ class Metaclassifier:
     a meta-classifier that uses several other base classifiers to produce its own classifications
     '''
 
-    def __init__( self, model_names = available_models.split( ',' ) ):
+    def __init__( self, model_names = default_models.split( ',' ) ):
         '''
         model_names = a python list of model names, the model names should correspond to the used models
         '''
         self.model_names = model_names
-        self.models = [ model_to_class[ x ]( **( model_params[ x ] ) ) for x in model_names ]
+        for x in model_names:
+            model_class = model_to_class[ x ]
+            self.models = [ model_class( **( model_params[ model_class ] ) ) for x in model_names ]
         self.skip_models = [ 0 ] * len( self.models )
         self.models.append( MLPClassifier() )
 
-    def generate_base_classifier_predictions( self, x ):
+    def generate_base_classifier_predictions( self, x, sx ):
         predictions = []
         # create predictions for all classifier except for the last one, the meta-classifier
         for idx, model in enumerate( self.models[ : -1 ] ):
@@ -49,16 +60,24 @@ class Metaclassifier:
             if self.skip_models[ idx ] == 1:
                 predictions.append( np.array( [ 'H' ] * len( x ) ) )
             else:
-                predictions.append( model.predict( x ) )
+                if isinstance( model, MultinomialNB ):
+                    predictions.append( model.predict( x ) )
+                else:
+                    predictions.append( model.predict( sx ) )
 
         predictions = pd.DataFrame( predictions ).replace( { 'H' : 1, "NH" : 0 } ).transpose()
         predictions.columns = self.model_names
         return predictions
 
-    def train_base_classifiers( self, x, y ):
+    def train_base_classifiers( self, x, sx, y ):
         for idx, model in enumerate( self.models[ : -1 ] ):
             try:
-                model.fit( x, y )
+                if isinstance( model, MultinomialNB ):
+                    # don't scale for NB
+                    model.fit( x, y )
+                else:
+                    # scale it for all others
+                    model.fit( sx, y )
             except ValueError:
                 # could not train the model
                 # should only happen during bootstrap analysis when both H and NH are not present in
@@ -69,9 +88,9 @@ class Metaclassifier:
             #    # the model didn't converge
             #    pass
 
-    def fit( self, x, y ):
-        self.train_base_classifiers( x, y )
-        predictions = self.generate_base_classifier_predictions( x )
+    def fit( self, x, sx, y ):
+        self.train_base_classifiers( x, sx, y )
+        predictions = self.generate_base_classifier_predictions( x, sx )
         try:
             self.models[ -1 ].fit( predictions, y )
         except:
@@ -80,10 +99,9 @@ class Metaclassifier:
         #    # the model didn't converge
         #    pass
 
-    def predict( self, x ):
-        predictions = self.generate_base_classifier_predictions( x )
+    def predict( self, x, sx ):
+        predictions = self.generate_base_classifier_predictions( x, sx )
         return self.models[ -1 ].predict( predictions )
-
 
 # global variables
 version = "0.1a"
@@ -98,7 +116,7 @@ default_seqgen_opts = "-mWAG -k1 -n1"
 
 # number of replicates for bootstrap analysis when testing the models
 # TODO: change this to 100
-num_replicates = 100
+replicates = 30
 
 # amino acid properties
 # courtesy of Nick Jensen, thanks Nick!
@@ -136,7 +154,8 @@ aa_uncharged_polar = [ 'S', 'N', 'Q', 'T' ]
 aa_charged = [ 'E', 'D', 'K', 'H', 'R' ]
 aa_hydrophobic = [ 'W', 'I', 'Y', 'F', 'V', 'M', 'L', 'A' ]
 
-default_bootstrap_percentages = "1,2,3,4,5,6,7,8,9,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100"
+bootstrap_percentages_str = "1,2,3,4,5,6,7,8,9,10,15,20,25,30,35,40,45,50,55,60,65,70,75,80,85,90,95,100"
+bootstrap_percentages = map( float, bootstrap_percentages_str.split( ',' ) )
 
 model_to_class = {
         "svm" : SVC,
@@ -148,12 +167,18 @@ model_to_class = {
         }
 
 model_params = {
-        "svm" : {
+        SVC : {
             "kernel" : "poly",
-            "cache_size" = 4000
-            }
+            "cache_size" : 4000
+            },
+        RandomForestClassifier : {},
+        MultinomialNB : {},
+        LogisticRegression : {},
+        Metaclassifier : {
+            "model_names" : [ "svm", "neural_network", "naive_bayes", "logistic_regression" ]
+            },
+        MLPClassifier : {}
         }
-
 
 def share_models( model_to_class_, model_params_ ):
     global model_to_class, model_params
@@ -770,8 +795,12 @@ def save_featurized_dataset( dest_path, readable_data, pickle_dest_path, pd_data
     errw( " Done!\n" )
 
 def train_model( model ):
-    cur_model = model_to_class[ model ]( **( model_params[ model ] ) )
-    cur_model.fit( x, y )
+    model_class = model_to_class[ model ]
+    cur_model = model_class( **( model_params[ model_class ] ) )
+    if isinstance( cur_model, Metaclassifier ):
+        cur_model.fit( x, sx, y )
+    else:
+        cur_model.fit( x, y )
 
     with lock:
         errw( "\t\tTraining " + model + "... Done!\n" )
@@ -782,7 +811,7 @@ def train_model( model ):
 def format_data_for_training( data ):
     # prep the data
     ## turn the data into a pandas dataframe with appropriate labels
-    columns = available_features.split( ',' )
+    columns = available_features_str.split( ',' )
     columns.append( "class" )
     data = pd.DataFrame( data, columns = columns )
 
@@ -798,6 +827,9 @@ def create_trained_models( models, features, data, threads ):
     # needed for data prep
     features = features.split( ',' )
 
+    # generate the scaled data
+    sdata = scale( data.copy() )
+
     ## separate into features and labels
     x = data[ features ]
     y = data[ "class" ]
@@ -807,18 +839,28 @@ def create_trained_models( models, features, data, threads ):
     ## TODO: parameterize random state for testing reproducibility
     x_train, x_test, y_train, y_test = train_test_split( x, y, test_size = 0.2 )
 
+    # get the scaled x values after the split
+    sx_train = sdata.loc[ x_train.index ][ features ]
+    sx_test = sdata.loc[ x_test.index ][ features ]
+
     errw( "\t\tTrain size: " + str( len( x_train ) ) + " instances\n" )
     errw( "\t\tTest size: " + str( len( x_test ) ) + " instances\n" )
 
-    trained_models = []
     if len( models ) > 1:
-        model = Metaclassifier( models )
+        model_class = model_to_class[ "metaclassifier" ]
     else:
-        model = models[ 0 ]()
-    
-    model.fit( x_train, y_train )
+        model_class = model_to_class[ models[ 0 ] ]
+    model = model_class( **model_params[ model_class ] )
 
-    predictions_test = model.predict( x_test )
+    if isinstance( model_class, Metaclassifier ):
+        model.fit( x_train, sx_train, y_train )
+        predictions_test = model.predict( x_test, sx_test )
+    elif isinstance( model_class, MultinomialNB ):
+        model.fit( x_train, y_train )
+        predictions_test = model.predict( x_test )
+    else:
+        model.fit( sx_train, y_train )
+        predictions = model.predict( sx_test )
 
     # output accuracy
     accuracy = accuracy_score( y_test, predictions_test )
@@ -829,225 +871,159 @@ def create_trained_models( models, features, data, threads ):
     return model
 
 
-def train_return_acc( item ):
-    x_train = item[ 0 ]
-    y_train = item[ 1 ]
-    x_test = item[ 2 ]
-    y_test = item[ 3 ]
-    model = model_to_class[ item[ 4 ] ]( **( model_params[ item[ 4 ] ) )
+def train_individual_model( model, x_train, sx_train, y_train ):
+    if isinstance( model, Meteclassifier ):
+        model.fit( x_train, sx_train, y_train )
+    elif isinstnace( model, MultinomialNB ):
+        model.fit( x_train, y_train )
+    else:
+        model.fit( sx_train, y_train )
 
-    with warnings.catch_warnings():
-        warnings.simplefilter( "ignore" )
-        try:
-            model.fit( x_train, y_train )
-            preds = model.predict( x_test )
-            acc = accuracy_score( y_test, preds )
 
-            return acc
-        except ValueError:
-            return 0.
-        except Warning:
-            return 0.
-    return 0.
+def get_correct_preds( model, x_test, sx_test ):
+    if isinstance( model, Meteclassifier ):
+        preds = model.predict( x_test, sx_test )
+    elif isinstnace( model, MultinomialNB ):
+        preds = model.predict( x_test )
+    else:
+        preds = model.predict( sx_test )
+    return preds
+   
 
+def bootstrap( model, model_params = {}, data = None, sdata = None, features = available_features, verbosity = 0 ):
+
+    acc_train = []
+    acc_test = []
+    for perc in bootstrap_percentages:
+        # resample data
+        num_instances = int( math.ceil( len( data ) * ( perc / 100 ) ) )
+
+        acc_perc_train = []
+        acc_perc_test = []
+
+        for rep in range( replicates ):
+            train, test, strain, stest = train_test_split( data, sdata, test_size = 0.2 )
+            x_test = test[ features ]
+            sx_test = stest[ features ]
+            
+            test_labels = test[ "class" ]
+            
+            sub_train = train.sample( num_instances, replace = True )
+            sub_strain = strain.loc[ sub_train.index ]
+
+            x_train = sub_train[ features ]
+            sx_train = sub_strain[ features ]
+
+            train_labels = sub_train[ "class" ]
+
+            #print "\trep:", rep
+            mod = model( **model_params )
+            try:
+                if isinstance( mod, Metaclassifier ):
+                    mod.fit( x_train, sx_train, train_labels )
+                    
+                    preds = mod.predict( x_train, sx_train )
+                    acc_perc_train.append( accuracy_score( preds, train_labels ) )
+                    
+                    preds = mod.predict( x_test, sx_test )
+                    acc_perc_test.append( accuracy_score( preds, test_labels ) )
+                elif isinstance( mod, MultinomialNB ):
+                    mod.fit( x_train, train_labels )
+                    
+                    preds = mod.predict( x_train )
+                    acc_perc_train.append( accuracy_score( preds, train_labels ) )
+                    
+                    preds = mod.predict( x_test )
+                    acc_perc_test.append( accuracy_score( preds, test_labels ) )
+                else:
+                    mod.fit( sx_train, train_labels )
+            
+                    preds = mod.predict( sx_train )
+                    acc_perc_train.append( accuracy_score( preds, train_labels ) )
+                    
+                    preds = mod.predict( sx_test )
+                    acc_perc_test.append( accuracy_score( preds, test_labels ) )
+            except ValueError as e:
+                print x_train
+
+            # train dataset
+            
+
+            # test dataset
+        
+        if verbosity > 0:
+            print "perc:", perc, np.mean( acc_perc_train ), np.mean( acc_perc_test ), np.std( acc_perc_train ), np.std( acc_perc_test )
+        acc_train.append( acc_perc_train )
+        acc_test.append( acc_perc_test )
+    return acc_train, acc_test
+
+
+def gen_plot( model, acc_train, acc_test, y_lim_min = 0.5, y_lim_max = 1.0 ):
+    acc_train_ = np.asarray( acc_train )
+    acc_test_ = np.asarray( acc_test )
+
+    avgs_train = acc_train_.mean( axis = 1 )
+    errs_train = acc_train_.std( axis = 1 )
+
+    avgs_test = acc_test_.mean( axis = 1 )
+    errs_test = acc_test_.std( axis = 1 )
+
+    avgs = pd.DataFrame( [ avgs_train, avgs_test ] ).transpose()
+    avgs.columns = [ "Train", "Test" ]
+    avgs[ "perc" ] = pd.Series( map( int, bootstrap_percentages_str.split( ',' ) ), index = avgs.index )
+    avgs.set_index( "perc", inplace = True )
+
+    errs = pd.DataFrame( [ errs_train, errs_test ] ).transpose()
+    errs.columns = [ "Train", "Test" ]
+    errs[ "perc" ] = pd.Series( map( int, bootstrap_percentages_str.split( ',' ) ), index = errs.index )
+    errs.set_index( "perc", inplace = True )
+
+    fig, ax = plt.subplots()
+    fig.set_size_inches( 12, 8, forward = True )
+    plt.title( model + " accuracy" )
+    plt.ylim( y_lim_min, y_lim_max )
+    plt.xlabel( "% of total training set" )
+    plt.ylabel( "% accuracy" )
+    avgs.plot.line( ax = ax, color = [ 'b', 'r' ] )
+    plt.fill_between( avgs.index, avgs[ "Train" ] - errs[ "Train" ], avgs[ "Train" ] + errs[ "Train" ], facecolor = 'blue', alpha = 0.2 )
+    plt.fill_between( avgs.index, avgs[ "Test" ] - errs[ "Test" ], avgs[ "Test" ] + errs[ "Test" ], facecolor = 'red', alpha = 0.2 )
+    plt.xticks( avgs.index.values, map( str, avgs.index.values ), fontsize = 8 )
+    leg = plt.legend( fontsize = 8 )
 
 # These are tests that will help verify results of the models
 def run_validation( test_dir, data, threads ):
-    errw( "\tRunning validation...\n" )
-
-    boot_percs = map( int, default_bootstrap_percentages.split( ',' ) )
-
-    # set up features
-    features = available_features.split( ',' )
-
-    # first, split the data into train and test
-    # TODO: parameterize the test size
-    train, test = train_test_split( data, test_size = 0.2 )
-
-    # set up test data
-    x_test = test[ features ]
-    y_test = test[ "class" ]
-    
-    # pool for multithreading
-
-    ## check inidivudal model performance with bootstrap analysis
-    ## this is run for 100 replicates
-    errw( "\t\tValidate models...\n" )
-    all_percs_train = dict()
-    all_percs_test = dict()
+    shuffled_data = data.copy()
+    shuffled_data = skshuffle( shuffled_data )
+    scaled_shuffled_data = shuffled_data.copy()
+    scaled_shuffled_data[ available_features ] = scale( shuffled_data[ available_features ] )
+    sdata = scaled_shuffled_data.copy()
     for model_name, model_class in model_to_class.iteritems():
-        errw( "\t\t\tValidating " + model_name + "..." )
-        model_acc_train = []
-        model_acc_test = []
-        #model = model_class()
-
-        for boot_perc in boot_percs:
-            boot_perc_acc = []
-            num_instances = int( math.ceil( ( float( boot_perc ) / 100 ) * len( train ) ) )
-
-            #print "number of instances: " + str( num_instances )
-            tasks_test = []
-            tasks_train = []
-            for i in range( num_replicates ):
-                # get the sub-sampled data
-                sub_train = train.sample( n = num_instances, replace = True )
-                x_train = sub_train[ features ]
-                y_train = sub_train[ "class" ]
-
-                tasks_train.append( ( x_train, y_train, x_train, y_train, model_name ) )
-                tasks_test.append( ( x_train, y_train, x_test, y_test, model_name ) )
-
-            pool = Pool( threads, initializer = share_model, initargs = ( model_to_class, model_params ) )
-            boot_perc_acc = pool.map( train_return_acc, tasks_test )
-            pool.close()
-            pool.join()
-            model_acc_test.append( boot_perc_acc )
-
-        errw( " Done!\n" )
-        formatted_percs = pd.DataFrame( model_acc_test ).transpose()
-        formatted_percs.columns = boot_percs
-        all_percs_test[ model_name ] = formatted_percs
-
-        formatted_percs = pd.DataFrame( model_acc_train ).transpose()
-        formatted_percs.columns = boot_percs
-        all_percs_train[ model_name ] = formatted_percs
-    errw( "\t\tCompleted model validation\n" )
-
-    errw( "\t\tWriting accuracy plots to disk...\n" )
-    for model, percs in all_percs_train.iteritems():
-        errw( "\t\t\tGenerating plot for " + model + "..." )
-
-        avgs_train = percs.mean()
-        errs_train = percs.std()
-
-        avgs_test = all_percs_test[ model ].mean()
-        errs_test = all_percs_test[ model ].std()
-
-        avgs = pd.DataFrame( [ avgs_train, avgs_test ] ).transpose()
-        avgs.columns = [ "Train", "Test" ]
-
-        errs = pd.DataFrame( [ errs_train, errs_test ] ).transpose()
-        errs.columns = [ "Train", "Test" ]
-
-        fig, ax = plt.subplots()
-        #leg = plt.legend( fontsize = 8 )
-        #leg = plt.gca().get_legend()
-        #ltext  = leg.get_texts()
-        #plt.setp( ltext, fontsize = 8 )
-        fig.set_size_inches( 12, 8, forward = True )
-        plt.title( model + " accuracy" )
-        plt.ylim( 0.5, 1.0 )
-        plt.xlabel( "% of total training set" )
-        plt.ylabel( "% accuracy" )
-        avgs.plot.line( ax = ax, color = [ 'b', 'r' ] )
-        plt.fill_between( avgs.index.values, avgs[ "Train" ] - errs[ "Train" ], avgs[ "Train" ] + errs[ "Train" ], facecolor = 'blue', alpha = 0.2 )
-        plt.fill_between( avgs.index.values, avgs[ "Test" ] - errs[ "Test" ], avgs[ "Test" ] + errs[ "Test" ], facecolor = 'red', alpha = 0.2 )
-        plt.xticks( avgs.index.values, map( str, avgs.index.values ), fontsize = 8 )
-        leg = plt.legend( fontsize = 8 )
-        plt.savefig( test_dir + "/model_validation.bootstrap_plot." + model + ".png" )
-
+        errw( "\t\tValidating " + model_name + "..." )
+        acc_train, acc_test = bootstrap(
+                model_class,
+                model_params = model_params[ model_class ],
+                data = shuffled_data,
+                sdata = scaled_shuffled_data
+                )
+        gen_plot( model_name, acc_train, acc_test, y_lim_min = 0.7 )
+        plt.savefig( test_dir + "/model_validation.bootstrap_plot." + model_name + ".png" )
         errw( " Done!\n" )
 
-    errw( "\t\tCompleted writing data to disk!\n" )
-
-    errw( "\t\tWriting model accuracies to disk...\n" )
-    # create plots for each model
-    for dataset, all_percs in [ ( "train", all_percs_train ), ( "test", all_percs_test ) ]:
-        for model, percs in all_percs.iteritems():
-            errw( "\t\t\tWriting " + model + " " + dataset + " dataset accuracy values to disk..." )
-
-            with open( test_dir + "/model_validation." + dataset + ".bootstrap_values." + model + ".csv", 'w' ) as fh:
-                fh.write( percs.to_csv() )
-
-            errw( " Done!\n" )
-
-    errw( "\t\tCompleted writing data to disk!\n" )
-
-    errw( "\t\tValidate features...\n" )
-    ## check individual feature performance using the metaclassifier
-    ## this is run for 100 replicates
-    all_feature_percs = dict()
-    for feature in features:
-        errw( "\t\t\tValidating " + feature + "..." )
-        feature_acc = []
-        for boot_perc in boot_percs:
-            boot_perc_acc = []
-            num_instances = int( math.ceil( ( float( boot_perc ) / 100 ) * len( train ) ) )
-
-            tasks = []
-            for i in range( num_replicates ):
-                sub_train = train.sample( n = num_instances, replace = True )
-                x_train = sub_train[ feature ].reshape(-1, 1)
-                y_train = sub_train[ "class" ]
-                tasks.append( ( x_train, y_train, x_test[ feature ].reshape( -1, 1 ), y_test, "metaclassifier" ) )
-                
-                #model = model_to_class[ "metaclassifier" ]()
-                #model.fit( x_train, y_train )
-
-                #preds = model.predict( x_test[ feature ].reshape(-1, 1) )
-                #acc = accuracy_score( y_test, preds )
-                #boot_perc_acc.append( acc )
-            pool = Pool( threads, initializer = share_models, initargs = ( model_to_class, model_params ) )
-            boot_perc_acc = pool.map( train_return_acc, tasks )
-            pool.close()
-            pool.join()
-            feature_acc.append( boot_perc_acc )
-        formatted_percs = pd.DataFrame( feature_acc ).transpose()
-        formatted_percs.columns = boot_percs
-        all_feature_percs[ feature ] = formatted_percs
+    for feature in available_features:
+        model_for_feature_validation = "neural_network"
+        errw( "\t\tValidating " + feature + " with " + model_for_feature_validation + "..." )
+        model_class = model_to_class[ model_for_feature_validation ]
+        feat_acc_train, feat_acc_test = bootstrap(
+                model_class,
+                model_params = model_params[ model_class ],
+                data = shuffled_data,
+                sdata = scaled_shuffled_data,
+                features = [ feature ],
+                verbosity = 0
+                )
+        gen_plot( model_for_feature_validation + ": " + feature, feat_acc_train, feat_acc_test, y_lim_min = 0.5 )
+        plt.savefig( test_dir + "/feature_validation.bootstrap_plot." + model_for_feature_validation + "." + feature + ".png" )
         errw( " Done!\n" )
-
-    pool.close()
-    errw( "\t\tWriting accuracies to disk...\n" )
-    # create plots for each model
-
-    model = "metaclassifier"
-    all_means = []
-    all_errs = []
-    col_names = []
-    for feature, percs in all_feature_percs.iteritems():
-        errw( "\t\t\tWriting " + feature + " accuracy values to disk..." )
-
-        with open( test_dir + "/feature_validation.bootstrap_values." + model + "." + feature + ".csv", 'w' ) as fh:
-            fh.write( percs.to_csv() )
-
-        col_names.append( feature )
-        avgs = percs.mean()
-        errs = percs.std()
-
-        all_means.append( avgs )
-        all_errs.append( errs )
-
-        errw( " Done!\n" )
-
-    errw( "\t\tGenerating features plot..." )
-
-    all_means = pd.DataFrame( all_means ).transpose()
-    all_means.columns = col_names
-    colors = [ "blue", "red", "yellow", "orange", "green", "black", "cyan", "gray", "purple", "pink" ]
-
-    fig, ax = plt.subplots()
-    #leg = plt.gca().get_legend()
-    #ltext  = leg.get_texts()
-    #plt.setp( ltext, fontsize = 8 )
-    fig.set_size_inches( 12, 8, forward = True )
-    plt.title( model + " test set accuracy per feature" )
-    plt.ylim( 0.0, 1.0 )
-    plt.xlabel( "% of total training set" )
-    plt.ylabel( "% accuracy" )
-    all_means.plot.line( ax = ax, color = colors )
-
-    for idx, feature in enumerate( col_names ):
-        plt.fill_between( all_means.index.values, all_means[ feature ] - errs, all_means[ feature ] + errs, facecolor = colors[ idx ], alpha = 0.1 )
-
-    plt.xticks( all_means.index.values, map( str, all_means.index.values ), fontsize = 8 )
-    leg = plt.legend( fontsize = 8 )
-    plt.savefig( test_dir + "/feature_validation.bootstrap_plot." + model + ".png" )
-    errw( " Done!\n" )
-
-    errw( "\t\tCompleted writing data and plots to disk!\n" )
-
-    errw( "\tCompleted validation!\n" )
 
 
 def load_featurized_data( file_path ):
@@ -1087,6 +1063,10 @@ def dir_check( dir_path ):
     return False
 
 
+def clean_dir( dir ):
+    call( [ "rm", "-rf", dir + "/*" ] )
+
+
 def train_models( args ):
     errw( "Aligner: " + args.aligner_path + "\n" )
     errw( "Aligner args: " + args.aligner_options + "\n" )
@@ -1100,7 +1080,7 @@ def train_models( args ):
 
     ## verify specified features
     check_feats = args.features.split( ',' )
-    feats_avail = available_features.split( ',' )
+    feats_avail = available_features_str.split( ',' )
     for feat in check_feats:
         if feat not in feats_avail:
             sys.exit( "ERROR! User specified invalid feature: " + feat )
@@ -1136,6 +1116,9 @@ def train_models( args ):
         ortho_groups = segregate_orthodb_groups( args.orthodb_fasta, args.orthodb_groups_dir )
         errw( "Number of groups: " + str( len( ortho_groups ) ) + "\n" )
 
+        if args.clean:
+            clean_dir( args.logs_dir )
+
         # align the orthodb clusters
         align_clusters(
                 args.aligner_path,
@@ -1146,6 +1129,9 @@ def train_models( args ):
                 args.threads,
                 args.logs_dir
                 )
+
+        if args.clean:
+            clean_dir( args.logs_dir )
 
         # process the seqgen_opts
         args.seqgen_opts = args.seqgen_opts.split()
@@ -1165,6 +1151,9 @@ def train_models( args ):
                 args.seqgen_opts
                 )
 
+        if args.clean:
+            clean_dir( args.logs_dir )
+
         # align the non-homology clusters
         align_clusters(
                 args.aligner_path,
@@ -1175,6 +1164,9 @@ def train_models( args ):
                 args.threads,
                 args.logs_dir
                 )
+
+        if args.clean:
+            clean_dir( args.logs_dir )
 
         # featurize datasets
         ## featurize orthodb groups
@@ -1187,6 +1179,9 @@ def train_models( args ):
                 args.aliscore_path,
                 )
 
+        if args.clean:
+            clean_dir( args.logs_dir )
+
         ## featurize nh groups
         nh_featurized = featurize_clusters(
                 args.aligned_nh_dir,
@@ -1196,8 +1191,14 @@ def train_models( args ):
                 args.aliscore_path,
                 )
 
+        if args.clean:
+            clean_dir( args.logs_dir )
+
         ## format data with correct column headers
         data = format_data_for_training( h_featurized + nh_featurized  )
+
+        if args.clean:
+            clean_dir( args.logs_dir )
 
         ## concatenate the featurized tables into a single file and write to disk
         save_featurized_dataset(
@@ -1206,6 +1207,10 @@ def train_models( args ):
                 args.featurized_clusters_dir + "/featurized_data.pickle",
                 data
                 )
+
+        if args.clean:
+            clean_dir( args.logs_dir )
+
         if args.featurize_only:
             errw( "Featurizing dataset successful, quitting because --featurize_only set.\n" )
             sys.exit()
@@ -1462,13 +1467,13 @@ if __name__ == "__main__":
     train_group_model = sp_train.add_argument_group( "Model training", "Models and features available for training" )
     train_group_model.add_argument( "--models",
             type = str,
-            default = available_models,
+            default = default_models,
             help = "A comma separated list of models to use. Available models include: " + ", ".join( available_models.split( ',' ) ) + ". If more than one model is selected, a meta-classifier is used that combined all specified models."
             )
     train_group_model.add_argument( "--features",
             type = str,
-            default = available_features,
-            help  = "A comma separted list of features to use when training models. Available features include: " + ", ".join( available_features.split( ',' ) ) + "."
+            default = available_features_str,
+            help  = "A comma separted list of features to use when training models. Available features include: " + ", ".join( available_features_str.split( ',' ) ) + "."
             )
 
     train_group_misc = sp_train.add_argument_group( "Misc.", "Extra options you can set when you're running the program." )
@@ -1534,6 +1539,12 @@ if __name__ == "__main__":
             help = "Directory to store output of running tests."
             )
     
+    train_group_clean = sp_train.add_argument_group( "Cleaning", "There are many intermediary files that are generated while running this program, set this flag to clean as you go." )
+    train_group_clean.add_argument( "--clean",
+            default = False,
+            action = "store_true",
+            help = "Set this flag to delete temporary files as you go."
+            )
     args = parser.parse_args()
 
     main( args )
