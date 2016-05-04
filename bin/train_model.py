@@ -17,6 +17,7 @@ from sklearn.naive_bayes import MultinomialNB
 from sklearn.ensemble import BaggingClassifier
 
 from sklearn.preprocessing import scale
+from sklearn.preprocessing import StandardScaler
 from sklearn.cross_validation import train_test_split
 from sklearn.metrics import accuracy_score
 
@@ -271,7 +272,6 @@ def segregate_orthodb_groups( fasta_file_path, groups_dir ):
             if line[ 0 ] == '>':
                 m = regex.search( line )
                 t_group = m.group( 1 )
-                #print t_group
                 if cur_seq_header != "":
                     cur_group_seqs.append( cur_seq_header + "\n" + cur_seq_seq )
 
@@ -280,8 +280,6 @@ def segregate_orthodb_groups( fasta_file_path, groups_dir ):
                     
                     if cur_group != "":
                         group_names.append( cur_group )
-                        #print cur_group + "\t" + str( len( cur_group_seqs ) )
-                        # print group to file
                         with open( groups_dir + "/" + cur_group, 'w' ) as out:
                             for item in cur_group_seqs:
                                 out.write( item )
@@ -432,7 +430,6 @@ def merge_all_trees( tree_file_paths ):
 def evolve_seq( id, invariable_sites, output_dir, header, seq, tree ):
     seq_id = header[ 1 : ].split()[ 0 ].split( ':' )[ 1 ]
     seqgen_input = "1\t" + str( len( seq ) ) + "\n" + seq_id + "\t" + seq + "\n1\n" + tree
-    #print seqgen_input + "\n"
     id = id.split()[ 0 ]
     output_path = output_dir + "/" + id + "/" + seq_id + ".evolved"
 
@@ -535,13 +532,9 @@ def create_evolved_cluster( item ):
     dir_path = item[ 1 ]
     cluster_seqs = []
 
-    #with lock:
-    #    print group_id, dir_path
-
     for dirname, dirnames, filenames in os.walk( dir_path ):
         for filename in filenames:
             full_path = os.path.join( dirname, filename )
-            print "\t", filename
 
             if os.stat( full_path ).st_size == 0:
                 continue
@@ -553,7 +546,6 @@ def create_evolved_cluster( item ):
                 for line in fh:
                     spec_seqs.append( line.strip().split()[ 1 ] )
                 if len( spec_seqs ) == 0:
-                    print "\t\tnothing in file"
                     continue
 
                 rand_seq = spec_seqs[ np.random.randint( len( spec_seqs ) - 1 ) ]
@@ -753,8 +745,6 @@ def featurize_cluster( item ):
 def featurize_clusters( cluster_dir, working_dir, cluster_ids, threads, label, aliscore_path ):
     errw( "\t\tFeaturizing " + label + " clusters...\n" )
     tasks = [ ( idx, x, cluster_dir + "/" + x ) for idx, x in enumerate( cluster_ids ) ]
-    #featurized_clusters = [ 0 for x in cluster_ids ]
-    #featurized_clusters = Queue
    
     lock = Lock()
     pool = Pool(
@@ -771,9 +761,6 @@ def featurize_clusters( cluster_dir, working_dir, cluster_ids, threads, label, a
     pool.close()
     pool.join()
 
-    #for featurized_cluster in featurized_clusters:
-    #    print featurized_cluster
-
     errw( "\t\tDone featurizing clusters!\n" )
 
     return featurized_clusters
@@ -781,10 +768,8 @@ def featurize_clusters( cluster_dir, working_dir, cluster_ids, threads, label, a
 
 def save_featurized_dataset( dest_path, readable_data, pickle_dest_path, pd_data ):
     errw( "\t\tSaving featurized data set to " + dest_path + "..." )
-    #print data
     with open( dest_path, 'w' ) as fh:
         for item in readable_data:
-            #print item
             fh.write( ", ".join( map( str, item ) ) + "\n" )
 
     errw( " Done!\n" )
@@ -818,17 +803,21 @@ def format_data_for_training( data ):
     return data
 
 
-def create_trained_models( models, features, data, threads ):
-    errw( "\tTraining models\n" )
-    # prep the models
-    models = models.split( ',' )
+def create_trained_model( model, features, data, threads ):
+    errw( "\tTraining model\n" )
+    # prep the model
+    model = model.split( ',' )
 
     # prep features
     # needed for data prep
     features = features.split( ',' )
 
     # generate the scaled data
-    sdata = scale( data.copy() )
+    sdata = data.copy()
+    
+    ss = StandardScaler()
+    ss.fit( sdata[ features ] )
+    sdata[ features ] = ss.transform( sdata[ features ] )
 
     ## separate into features and labels
     x = data[ features ]
@@ -846,29 +835,29 @@ def create_trained_models( models, features, data, threads ):
     errw( "\t\tTrain size: " + str( len( x_train ) ) + " instances\n" )
     errw( "\t\tTest size: " + str( len( x_test ) ) + " instances\n" )
 
-    if len( models ) > 1:
+    if len( model ) > 1:
         model_class = model_to_class[ "metaclassifier" ]
     else:
-        model_class = model_to_class[ models[ 0 ] ]
+        model_class = model_to_class[ model[ 0 ] ]
     model = model_class( **model_params[ model_class ] )
 
     if isinstance( model_class, Metaclassifier ):
         model.fit( x_train, sx_train, y_train )
-        predictions_test = model.predict( x_test, sx_test )
+        test_predictions = model.predict( x_test, sx_test )
     elif isinstance( model_class, MultinomialNB ):
         model.fit( x_train, y_train )
-        predictions_test = model.predict( x_test )
+        test_predictions = model.predict( x_test )
     else:
         model.fit( sx_train, y_train )
-        predictions = model.predict( sx_test )
+        test_predictions = model.predict( sx_test )
 
     # output accuracy
-    accuracy = accuracy_score( y_test, predictions_test )
+    accuracy = accuracy_score( y_test, test_predictions )
     errw( "\t\tTest set accuracy: " + str( accuracy ) + "\n" )
 
-    errw( "\tDone training models!\n" )
+    errw( "\tDone training model!\n" )
 
-    return model
+    return model, ss
 
 
 def train_individual_model( model, x_train, sx_train, y_train ):
@@ -916,7 +905,6 @@ def bootstrap( model, model_params = {}, data = None, sdata = None, features = a
 
             train_labels = sub_train[ "class" ]
 
-            #print "\trep:", rep
             mod = model( **model_params )
             try:
                 if isinstance( mod, Metaclassifier ):
@@ -944,7 +932,7 @@ def bootstrap( model, model_params = {}, data = None, sdata = None, features = a
                     preds = mod.predict( sx_test )
                     acc_perc_test.append( accuracy_score( preds, test_labels ) )
             except ValueError as e:
-                print x_train
+                pass
 
             # train dataset
             
@@ -952,7 +940,7 @@ def bootstrap( model, model_params = {}, data = None, sdata = None, features = a
             # test dataset
         
         if verbosity > 0:
-            print "perc:", perc, np.mean( acc_perc_train ), np.mean( acc_perc_test ), np.std( acc_perc_train ), np.std( acc_perc_test )
+            errw( "perc:\t" +  str( perc ) + "\t" + str( np.mean( acc_perc_train ) ) + "\t" + str( np.mean( acc_perc_test ) ) + "\t" + str( np.std( acc_perc_train ) ) + str( np.std( acc_perc_test ) ) + "\n" )
         acc_train.append( acc_perc_train )
         acc_test.append( acc_perc_test )
     return acc_train, acc_test
@@ -1029,17 +1017,20 @@ def run_validation( test_dir, data, threads ):
 def load_featurized_data( file_path ):
     return pickle.load( open( file_path, "rb" ) )
 
-def save_models( save_prefix, models, features, trained_models ):
-    errw( "\tSaving models..." )
+def save_model( save_dir, save_prefix, model, features, trained_model, scaler ):
+    errw( "\tSaving model..." )
     
-    with open( save_prefix + ".trained_models", "wb" ) as fh:
-        pickle.dump( trained_models, fh )
+    with open( save_dir + "/" + save_prefix + ".trained_model", "wb" ) as fh:
+        pickle.dump( trained_model, fh )
 
-    with open( save_prefix + ".features", 'w' ) as fh:
+    with open( save_dir + "/" + save_prefix + ".features", 'w' ) as fh:
         fh.write( features )
 
-    with open( save_prefix + ".models", 'w' ) as fh:
-        fh.write( models )
+    with open( save_dir + "/" + save_prefix + ".specified_model", 'w' ) as fh:
+        fh.write( model )
+
+    with open( save_dir + "/" + save_prefix + ".scaler", "wb" ) as fh:
+        pickle.dump( scaler, fh )
 
     errw( " Done!\n" )
 
@@ -1067,14 +1058,14 @@ def clean_dir( dir ):
     call( [ "rm", "-rf", dir + "/*" ] )
 
 
-def train_models( args ):
+def generate_trained_model( args ):
     errw( "Aligner: " + args.aligner_path + "\n" )
     errw( "Aligner args: " + args.aligner_options + "\n" )
 
     # verify parameters
-    ## verify specified models
-    check_models = args.models.split( ',' )
-    for model in check_models:
+    ## verify specified model
+    check_model = args.model.split( ',' )
+    for model in check_model:
         if model not in model_to_class.keys():
             sys.exit( "ERROR! User specified invalid model: " + model )
 
@@ -1217,7 +1208,7 @@ def train_models( args ):
     else:
         data = load_featurized_data( args.featurized_data )
 
-    # train models
+    # run tests
     if args.test:
         dir_check( args.test_dir )
         run_validation( args.test_dir, data, args.threads )
@@ -1226,10 +1217,12 @@ def train_models( args ):
             errw( "Model and feature validation successful, quitting because --test_only set.\n" )
             sys.exit()
 
-    models = create_trained_models( args.models, args.features, data, args.threads )
+    # train model
+    model, scaler = create_trained_model( args.model, args.features, data, args.threads )
 
-    # save models
-    save_models( args.save_prefix, args.models, args.features, models )
+    # save model
+    dir_check( args.trained_model_dir )
+    save_model( args.trained_model_dir, args.save_prefix, args.model, args.features, model, scaler )
 
 
 def parse_cluster_paths( file_path ):
@@ -1243,15 +1236,26 @@ def parse_cluster_paths( file_path ):
     return cluster_paths
 
 
-def load_models( models_prefix ):
-    errw( "\tLoading models..." )
-    with open( models_prefix + ".trained_models", "rb" ) as fh:
-        models = pickle.load( fh )
+def load_model( model_prefix ):
+    errw( "\tLoading model..." )
+    with open( model_prefix + ".trained_model", "rb" ) as fh:
+        model = pickle.load( fh )
+    with open( model_prefix + ".scaler", "rb" ) as fh:
+        scaler = pickle.load( fh )
     errw( " Done!\n" )
 
-    return models
+    return model, scaler
 
-# TODO: finish this
+
+def read_cluster_names( dir_path ):
+    names = []
+    for item in os.listdir( dir_path ):
+        if os.path.isfile( dir_path + "/" + item ):
+            # parse out name and append to list
+            names.append( item )
+    return names
+
+
 def classify_clusters( args ):
     errw( "Classifying clusters!\n" )
 
@@ -1263,31 +1267,72 @@ def classify_clusters( args ):
 
     # end verify parameters
 
-    # get cluster paths
-    cluster_paths = parse_cluster_paths( args.fasta_list )
+    # load model
+    model, scaler = load_model( args.model_prefix )
+
+    # get cluster names
+    cluster_names = read_cluster_names( args.fasta_dir )
 
     # if need to align, align clusters
     if not args.aligned:
         # check if aligned dir exsists
         dir_check( args.aligned_dir )
 
-        # align the clusters and save to a folder
+        align_clusters(
+                args.aligner_path,
+                "",
+                args.fasta_dir,
+                cluster_names,
+                args.aligned_dir,
+                args.threads,
+                args.logs_dir
+                )
 
-        # reset cluster_paths to the clusters in the folder
+        clean_dir( args.logs_dir )
+    else:
+        args.aligned_dir = args.fasta_dir
 
     # featurize clusters
-
-    # load models
-    models = load_models( args.models_prefix )
-
+    featurized = featurize_clusters(
+            args.aligned_dir,
+            args.aliscore_dir,
+            cluster_names,
+            args.threads,
+            '?',
+            args.aliscore_path,
+            )
+    #print featurized
+    data = format_data_for_training( featurized )
+    #print data
+    #data[ 'names' ] = pd.Series( cluster_names, index = data.index )
+    
     # classify
+    x = data[ available_features ]
+    sx = scaler.transform( data[ available_features ] )
+
+    #print x
+
+    if isinstance( model, Metaclassifier ):
+        preds = model.predict( x, sx )
+    elif isinstance( model, MultinomialNB ):
+        preds = model.predict( x )
+    else:
+        preds = model.predict( sx )
+
+    if args.clean:
+        clean_dir( args.logs_dir )
+
+    for name, pred in zip( cluster_names, preds ):
+        print name + "\t" + pred
+
+    errw( "Done!\n" )
 
 
 def main( args ):
     errw( "OrthoClean model training module version " + version + "\n" )
 
     if args.which == "train":
-        train_models( args )
+        generate_trained_model( args )
     elif args.which == "classify":
         classify_clusters( args )
 
@@ -1315,15 +1360,15 @@ if __name__ == "__main__":
 
     # sub parser classify options
     classify_group_in = sp_classify.add_argument_group( "Input", "Input files to run the program." )
-    classify_group_in.add_argument( "--fasta_list",
+    classify_group_in.add_argument( "--fasta_dir",
             type = str,
             required = True,
-            help = "A list containing all the paths to your fasta files. One file per line."
+            help = "A directory containing all the paths to your fasta files. One file per line."
             )
-    classify_group_in.add_argument( "--models",
+    classify_group_in.add_argument( "--model_prefix",
             type = str,
             required = True,
-            help = "Trained models used for classification."
+            help = "Trained model prefix for classification. Prepend any directories to saved models."
             )
 
     classify_group_opts = sp_classify.add_argument_group( "Options", "Options for running the program." )
@@ -1332,12 +1377,25 @@ if __name__ == "__main__":
             action = "store_true",
             help = "If your fasta file is already aligned, alignment will skip."
             )
-
-    classify_group_models = sp_classify.add_argument_group( "Model Options", "Options for loading trained models." )
-    classify_group_models.add_argument( "--models_prefix",
+    classify_group_opts.add_argument( "--threads",
+            type = int,
+            default = 1,
+            help = "Number of threads to use during alignment (Default 1)."
+            )
+    classify_group_opts.add_argument( "--aliscore_path",
             type = str,
-            required = True,
-            help = "Prefix of the saved models."
+            default = default_aliscore_path,
+            help = "Path to the aliscore binary."
+            )
+    classify_group_opts.add_argument( "--aligner_path",
+            type = str,
+            default = default_mafft_path,
+            help = "Default aligner is MAFFT and is set up during install. If you already have MAFFT or another aligner installed, provide the path here. NOTE: this program is only designed to work with MAFFT, other aligners will take modification."
+            )
+    classify_group_opts.add_argument( "--clean",
+            default = True,
+            action = "store_false",
+            help = "Set this flag to delete temporary files as you go."
             )
 
     classify_group_dir = sp_classify.add_argument_group( "Directories", "Directories where output will be stored." )
@@ -1425,6 +1483,11 @@ if __name__ == "__main__":
             default = "train_aliscores_nh",
             help = "Directory to store the aliscore for all non-homology clusters."
             )
+    train_group_dir.add_argument( "--trained_model_dir",
+            type = str,
+            default = "trained_model",
+            help = "Directory to store the trained model for classification."
+            )
 
     train_group_aligner = sp_train.add_argument_group( "Aligner options", "Options to use for aligning your sequence clusters." )
     train_group_aligner.add_argument( "--aligner_path",
@@ -1465,10 +1528,10 @@ if __name__ == "__main__":
             )
 
     train_group_model = sp_train.add_argument_group( "Model training", "Models and features available for training" )
-    train_group_model.add_argument( "--models",
+    train_group_model.add_argument( "--model",
             type = str,
             default = default_models,
-            help = "A comma separated list of models to use. Available models include: " + ", ".join( available_models.split( ',' ) ) + ". If more than one model is selected, a meta-classifier is used that combined all specified models."
+            help = "A comma separated list of models to use. Available models include: " + ", ".join( available_models.split( ',' ) ) + ". If more than one model is selected, a meta-classifier that utilizes stacking is used that combined all specified models."
             )
     train_group_model.add_argument( "--features",
             type = str,
@@ -1520,11 +1583,11 @@ if __name__ == "__main__":
             help = "Only perform validation of models and features, do not train final models. If --featurized_data is not set, it will featurize your data and a OrthoDB fasta is required. This flag will turn on --test."
             )
 
-    train_group_save = sp_train.add_argument_group( "Saving", "Options for saving your trained models." )
+    train_group_save = sp_train.add_argument_group( "Saving", "Options for saving your trained model." )
     train_group_save.add_argument( "--save_prefix",
             type = str,
             default = "trained_model",
-            help = "Save prefix for your trained models"
+            help = "Save prefix for your trained model"
             )
 
     train_group_test = sp_train.add_argument_group( "Testing", "Test your machine learning models." )
@@ -1541,8 +1604,8 @@ if __name__ == "__main__":
     
     train_group_clean = sp_train.add_argument_group( "Cleaning", "There are many intermediary files that are generated while running this program, set this flag to clean as you go." )
     train_group_clean.add_argument( "--clean",
-            default = False,
-            action = "store_true",
+            default = True,
+            action = "store_false",
             help = "Set this flag to delete temporary files as you go."
             )
     args = parser.parse_args()
