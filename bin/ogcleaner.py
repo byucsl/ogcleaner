@@ -1586,7 +1586,7 @@ if __name__ == "__main__":
     train_group_save = sp_train.add_argument_group( "Saving", "Options for saving your trained model." )
     train_group_save.add_argument( "--save_prefix",
             type = str,
-            default = "trained_model",
+            default = "filter",
             help = "Save prefix for your trained model"
             )
 

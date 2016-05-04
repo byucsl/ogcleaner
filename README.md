@@ -1,4 +1,4 @@
-# orthoclean
+# OGCleaner (Orthology Group Cleaner)
 
 ## Purpose
 
@@ -11,7 +11,8 @@ Our methodology is based outlined in [**Detecting false positive sequence homolo
 ## Required software
 
 1. python 2
-1. [scikit-learn](http://scikit-learn.org/stable/)
+1. [scikit-learn](https://github.com/scikit-learn/scikit-learn)
+    1. This currently requires the development branch (0.18.dev0) of scikit-learn for the neural network. You can install the developer branch by following the instructions [here](https://github.com/scikit-learn/scikit-learn).
 1. [Aliscore](https://www.zfmk.de/en/research/research-centres-and-groups/aliscore)
    1. This program requires perl
 1. [pandas](http://pandas.pydata.org/)
@@ -20,10 +21,14 @@ Our methodology is based outlined in [**Detecting false positive sequence homolo
 1. [PAML](http://abacus.gene.ucl.ac.uk/software/paml.html)
 1. [Seq-Gen](http://tree.bio.ed.ac.uk/software/seqgen/)
 
-Note: all necessary software packages (aside from the python modules) are included.
-The python modules can be installed via pip and the included requirements.txt.
+Note: all necessary software packages are included except:
+
+1. python packages
+1. scikit-learn dev branch
+
+The python modules can be installed via pip and the included requirements.txt and from [here](https://github.com/scikit-learn/scikit-learn).
 You can use your own installation of each of these software packages, but we suggest using the included packages.
-Follow these steps to install all software.
+Follow these steps to install all other software.
 
 ### Compiling MAFFT
 We include a modified version of MAFFT that is altered for installation without root permissions.
@@ -62,13 +67,30 @@ make seq-gen
 
 ## Tutorial
 
+This program has two modes that are specified as positional arguments when running.
+These two modes are: ```train``` and ```classify```.
+You can specify them by doing:
+
+```bash
+# To train a model
+python bin/ogcleaner.py train <additional arguments>
+
+# To classify clusters
+python bin/ogcleaner.py classify <additional arguments>
+```
+
+See the below sections for walkthroughs.
+
+
 ### Training a filtering model
+
+To train a model you must use the ```train``` positional argument.
 
 ```bash
 # Get a dataset from OrthoDB.
 # This can be done via the OrthoDB website, or you can use wget if you want to query their APIs directly as shownn below
 # this file is written to disk with the name 'universal.singlecopy0.9.fasta' as seen in the wget options
-wget -O universal.singlecopy0.9.fasta "http://orthodb.org/fasta?query=&level=6656&species=6656&universal=1&singlecopy=0.9"
+wget -O data/arthro.universal.singlecopy0.9.fasta "http://orthodb.org/fasta?query=&level=6656&species=6656&universal=1&singlecopy=0.9&limit=100000"
 
 # Run the model training script on the included test dataset (a very small subset of OrthoDB data)
 # This script will take care of everything for you after you have a dataset from OrthoDB, includeing:
@@ -77,30 +99,43 @@ wget -O universal.singlecopy0.9.fasta "http://orthodb.org/fasta?query=&level=665
 #   3. Align the clusters using MAFFT
 #   4. Featurize the clusters
 #   5. Train a filtering model
-python bin/train_model.py --orthodb_fasta data/small.fasta
+python bin/ogcleaner.py train --orthodb_fasta data/arthro.universal.singlecopy0.9.fasta
 ```
+
+Use the ```--threads NUM_FLAGS``` flag to multithread the process and make it go faster.
+
 This script will train a model for you and save the model to disk to be used in the following script.
 It also generates lots of intermediary files that can be removed if you do not wish to keep them.
-Use the ```make rm_int``` command to remove all intermediary files but still retain the trained models.
+Use the ```make clean``` command to remove all intermediary files but still retain the trained models.
+You can aluse use the ```--clean``` to remove the log files as you go.
 Note that this command only removes the default folders, if you specify your own folders during runtime they must be manually deleted.
 
 ### Filtering using a trained model
 
 ```bash
 # This will use the trained model in created in the previous step.
-run this commmand
+# It will filter the orthodb fasta files, all clusters should come back as H (homology clusters).
+python bin/ogcleaner.py classify --fasta_dir train_orthodb_groups_fasta/ --model trained_model/filter --threads 10
 ```
+
+You may also provide previously aligned clusters to the classifier by specifying the ```--aligned``` flag.
 
 You now have a filtered set of orthology clusters!
 
+### Testing your training dataset
+
+We have also included the ability to reproduce the plots in our paper and for you to be able to validate the effectiveness of your trained models.
+This includes doing bootstrap analysis for each model with all features and for each individual feature using a neural network.
+To run these tests and generate the plots, use the ```--test``` flag when
+
+```bash
+python bin/ogcleaner.py train --orthodb_fasta data/arthro.universal.singlecopy0.9.fasta --test
+```
+
 ### Notes on running the program:
 
-The train_model.py script is all-inclusive and will do everything for you.
-There are flags provided to skip steps in the pipeline.
-These flags are listed in the order that they are evaluated in the pipeline.
-If you skip a step all previous steps will be skipped as well.
-Each flag requires you to pass in a path to the directory containing the expected output from all previous steps.
-The skip flags are:
+The ogcleaner.py script is all-inclusive and will do everything for you.
+You may save time doing some of the following.
 
 ```
   --featurize_only      Only featurize the data, no testing or model training.
