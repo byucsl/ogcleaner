@@ -90,7 +90,7 @@ To train a model you must use the ```train``` positional argument.
 # Get a dataset from OrthoDB.
 # This can be done via the OrthoDB website, or you can use wget if you want to query their APIs directly as shownn below
 # this file is written to disk with the name 'universal.singlecopy0.9.fasta' as seen in the wget options
-wget -O data/arthro.universal.singlecopy0.9.fasta "http://orthodb.org/fasta?query=&level=6656&species=6656&universal=1&singlecopy=0.9&limit=100000"
+wget -O arthro.universal0.8.single0.8.fasta "http://orthodb.org/fasta?query=&level=6656&species=6656&universal=0.8&singlecopy=0.8&limit=100000"
 
 # Run the model training script on the included test dataset (a very small subset of OrthoDB data)
 # This script will take care of everything for you after you have a dataset from OrthoDB, includeing:
