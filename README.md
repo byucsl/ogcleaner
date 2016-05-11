@@ -99,7 +99,7 @@ wget -O arthro.universal0.8.single0.8.fasta "http://orthodb.org/fasta?query=&lev
 #   3. Align the clusters using MAFFT
 #   4. Featurize the clusters
 #   5. Train a filtering model
-python bin/ogcleaner.py train --orthodb_fasta data/arthro.universal.singlecopy0.9.fasta
+python bin/ogcleaner.py train --orthodb_fasta arthro.universal0.8.single0.8.fasta
 ```
 
 Use the ```--threads NUM_FLAGS``` flag to multithread the process and make it go faster.

@@ -19,9 +19,9 @@ lib/mafft_bin/mafft:
 	@echo "Done!"
 
 paml: lib/paml_bin/evolverRandomTree
-	
+
 lib/paml_bin/evolverRandomTree:
-	if[ -f lib/paml_bin ]; \
+	if [ -f lib/paml_bin ]; \
 		then \
 			rm lib/paml_bin; \
 		fi;
@@ -48,7 +48,7 @@ lib/aliscore_bin/Aliscore.02.2.pl:
 seq-gen: lib/seq-gen_bin/seq-gen
 	
 lib/seq-gen_bin/seq-gen:
-	if[ -f lib/seq-gen_bin ]; \
+	if [ -f lib/seq-gen_bin ]; \
 		then \
 			rm lib/seq-gen_bin; \
 		fi;
