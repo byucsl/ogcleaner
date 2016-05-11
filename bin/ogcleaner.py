@@ -1329,6 +1329,7 @@ def classify_clusters( args ):
 
 
 def main( args ):
+    errw( "Command: " + " ".join( sys.argv ) + "\n" )
     errw( "OrthoClean model training module version " + version + "\n" )
 
     if args.which == "train":
