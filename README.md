@@ -122,6 +122,11 @@ You may also provide previously aligned clusters to the classifier by specifying
 
 You now have a filtered set of orthology clusters!
 
+#### Using Pre-Trained Models
+
+A pre-trained model is provided in the repository.
+Use the prefix ```pretrained_models/pretrained_filter``` while using OGCleaner in classify mode.
+
 ### Testing your training dataset
 
 We have also included the ability to reproduce the plots in our paper and for you to be able to validate the effectiveness of your trained models.
