@@ -26,8 +26,8 @@ Note: all necessary software packages are included except:
 1. python packages
 1. scikit-learn dev branch
 
-The python modules can be installed via pip and the included requirements.txt and from [here](https://github.com/scikit-learn/scikit-learn).
-You can use your own installation of each of these software packages, but we suggest using the included packages.
+The python modules can be installed via pip and the included requirements.txt and from [here](https://github.com/scikit-learn/scikit-learn) for scikit-learn.
+We strongly suggest using a [virtualenv](https://virtualenv.pypa.io/en/stable/) as a way to set up an isolated python module environment.
 Follow these steps to install all other software.
 
 ### Compiling MAFFT
