@@ -264,7 +264,7 @@ def generate_paml_config( seed, v ):
     return config_text.format( seed, int( v ) )
 
 
-def segregate_orthodb_groups( fasta_file_path, groups_dir ):
+def segregate_orthodb_groups( fasta_file_path, groups_dir, og_field_pos ):
 
     errw( "\tSegregating the sequences into their orthogroups..." )
     # read in the fasta file
@@ -283,8 +283,13 @@ def segregate_orthodb_groups( fasta_file_path, groups_dir ):
 
         for line in fh:
             if line[ 0 ] == '>':
-                m = regex.search( line )
-                t_group = m.group( 1 )
+
+                if og_field_pos == -1:
+                    t_group = line.split()[ og_field_pos ]
+                else:
+                    m = regex.search( line )
+                    t_group = m.group( 1 )
+
                 if cur_seq_header != "":
                     cur_group_seqs.append( cur_seq_header + "\n" + cur_seq_seq )
 
@@ -991,6 +996,7 @@ def gen_plot( model, acc_train, acc_test, y_lim_min = 0.5, y_lim_max = 1.0 ):
     plt.xticks( avgs.index.values, map( str, avgs.index.values ), fontsize = 8 )
     leg = plt.legend( fontsize = 8 )
 
+
 # These are tests that will help verify results of the models
 def run_validation( test_dir, data, threads ):
     shuffled_data = data.copy()
@@ -1029,6 +1035,7 @@ def run_validation( test_dir, data, threads ):
 
 def load_featurized_data( file_path ):
     return pickle.load( open( file_path, "rb" ) )
+
 
 def save_model( save_dir, save_prefix, model, features, trained_model, scaler ):
     errw( "\tSaving model..." )
@@ -1117,7 +1124,7 @@ def generate_trained_model( args ):
 
         errw( "Beginning...\n" )
 
-        ortho_groups = segregate_orthodb_groups( args.orthodb_fasta, args.orthodb_groups_dir )
+        ortho_groups = segregate_orthodb_groups( args.orthodb_fasta, args.orthodb_groups_dir, args.og_field_pos )
         errw( "Number of groups: " + str( len( ortho_groups ) ) + "\n" )
 
         if args.clean:
@@ -1563,6 +1570,11 @@ if __name__ == "__main__":
             type = int,
             default = -1,
             help = "Seed to use for generating trees in PAML and for sampling sequences for non-homology cluster generation."
+            )
+    train_group_misc.add_argument( "--og_field_pos",
+            type = int,
+            default = -1,
+            help = "0-based index of orthology group ID when using custom data (not from OrthoDB). If using data from OrthoDB, this argument should be ignored."
             )
 
     train_group_skip = sp_train.add_argument_group( "Skip parts of the pipeline", "If you've already completed parts of the pipeline you can skip steps with these flags. Note: each flag requires you specify an output directory for the step you're skipping. Steps are listed in order, if you skip a step, all steps before it are skipped as well." )

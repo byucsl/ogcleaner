@@ -110,6 +110,11 @@ Use the ```make clean``` command to remove all intermediary files but still reta
 You can aluse use the ```--clean``` to remove the log files as you go.
 Note that this command only removes the default folders, if you specify your own folders during runtime they must be manually deleted.
 
+You can use your own orthology group data to train the model as well.
+Simply supply a FASTA file that contains all orthology groups.
+Each entry in the FASTA requires an ID that is unique to its respective orthology group.
+Use the ```--og_field-id``` to provie the 0-based index of the orthology group IDs during the training phase.
+
 ### Filtering using a trained model
 
 ```bash
