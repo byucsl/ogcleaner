@@ -99,16 +99,19 @@ wget -O arthro.universal0.8.single0.8.fasta "http://orthodb.org/fasta?query=&lev
 #   3. Align the clusters using MAFFT
 #   4. Featurize the clusters
 #   5. Train a filtering model
-python bin/ogcleaner.py train --orthodb_fasta arthro.universal0.8.single0.8.fasta
+python bin/ogcleaner.py train --orthodb_fasta arthro.universal0.8.single0.8.fasta --threads 10 --clean
 ```
 
-Use the ```--threads NUM_FLAGS``` flag to multithread the process and make it go faster.
+Using the ```--threads NUM_FLAGS``` flag will multithread the program and make it go faster.
 
 This script will train a model for you and save the model to disk to be used in the following script.
+The model is saved to disk to default locations but can be set by the ```--trained_model_dir``` and ```--save_prefix``` arguments.
 It also generates lots of intermediary files that can be removed if you do not wish to keep them.
 Use the ```make clean``` command to remove all intermediary files but still retain the trained models.
-You can aluse use the ```--clean``` to remove the log files as you go.
+You can also use the ```--clean``` to remove the log files as you go.
+It is highly suggested that you run with the ```--clean``` option.
 Note that this command only removes the default folders, if you specify your own folders during runtime they must be manually deleted.
+If you need to rebuild any of the packaged software (Aliscore, MAFFT, etc.) you can run ```make deepclean``` and it will delete all compiled versions of the program.
 
 You can use your own orthology group data to train the model as well.
 Simply supply a FASTA file that contains all orthology groups.
@@ -122,8 +125,6 @@ Use the ```--og_field_pos``` to provie the 0-based index of the orthology group 
 # It will filter the orthodb fasta files, all clusters should come back as H (homology clusters).
 python bin/ogcleaner.py classify --fasta_dir train_orthodb_groups_fasta/ --model trained_model/filter --threads 10
 ```
-
-You may also provide previously aligned clusters to the classifier by specifying the ```--aligned``` flag.
 
 You now have a filtered set of orthology clusters!
 

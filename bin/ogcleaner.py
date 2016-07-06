@@ -283,8 +283,7 @@ def segregate_orthodb_groups( fasta_file_path, groups_dir, og_field_pos ):
 
         for line in fh:
             if line[ 0 ] == '>':
-
-                if og_field_pos == -1:
+                if og_field_pos != -1:
                     t_group = line.split()[ og_field_pos ]
                 else:
                     m = regex.search( line )
@@ -294,8 +293,6 @@ def segregate_orthodb_groups( fasta_file_path, groups_dir, og_field_pos ):
                     cur_group_seqs.append( cur_seq_header + "\n" + cur_seq_seq )
 
                 if t_group != cur_group:
-
-                    
                     if cur_group != "":
                         group_names.append( cur_group )
                         with open( groups_dir + "/" + cur_group, 'w' ) as out:
@@ -1293,24 +1290,20 @@ def classify_clusters( args ):
     # get cluster names
     cluster_names = read_cluster_names( args.fasta_dir )
 
-    # if need to align, align clusters
-    if not args.aligned:
-        # check if aligned dir exsists
-        dir_check( args.aligned_dir )
+    # check if aligned dir exsists
+    dir_check( args.aligned_dir )
 
-        align_clusters(
-                args.aligner_path,
-                "",
-                args.fasta_dir,
-                cluster_names,
-                args.aligned_dir,
-                args.threads,
-                args.logs_dir
-                )
+    align_clusters(
+            args.aligner_path,
+            "",
+            args.fasta_dir,
+            cluster_names,
+            args.aligned_dir,
+            args.threads,
+            args.logs_dir
+            )
 
-        clean_dir( args.logs_dir )
-    else:
-        args.aligned_dir = args.fasta_dir
+    clean_dir( args.logs_dir )
 
     # featurize clusters
     featurized = featurize_clusters(
@@ -1393,11 +1386,6 @@ if __name__ == "__main__":
             )
 
     classify_group_opts = sp_classify.add_argument_group( "Options", "Options for running the program." )
-    classify_group_opts.add_argument( "--aligned",
-            default = False,
-            action = "store_true",
-            help = "If your fasta file is already aligned, alignment will skip."
-            )
     classify_group_opts.add_argument( "--threads",
             type = int,
             default = 1,
@@ -1507,7 +1495,7 @@ if __name__ == "__main__":
     train_group_dir.add_argument( "--trained_model_dir",
             type = str,
             default = "trained_model",
-            help = "Directory to store the trained model for classification."
+            help = "Directory to save the trained model for classification."
             )
 
     train_group_aligner = sp_train.add_argument_group( "Aligner options", "Options to use for aligning your sequence clusters." )

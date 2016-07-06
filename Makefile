@@ -69,7 +69,16 @@ rm_int:
 	rm -rf train_cluster_alignments_homology train_cluster_alignments_nh train_evolved_seqs train_nh_groups_fasta train_orthodb_groups_fasta train_paml_configs train_featurized_clusters train_evolved_seqs train_aliscores_nh train_aliscores_homology train_paml_trees
 	rm -rf classify_aligned_dir classify_featurized_clusters classify_aliscores
 	rm -rf logs
-	rm mc.paml evolver.out SeedUsed siterates.txt 
 
 clean: rm_int
 	rm -rf model
+
+deepclean: clean
+	rm -rf lib/Aliscore_v.2.0
+	rm lib/aliscore_bin
+	rm -rf lib/mafft-7.273-without-extensions
+	rm lib/mafft_bin
+	rm -rf lib/paml4.9a
+	rm lib/paml_bin
+	rm -rf lib/Seq-Gen.v1.3.3
+	rm lib/seq-gen_bin
