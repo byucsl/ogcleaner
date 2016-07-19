@@ -659,7 +659,7 @@ def featurize_cluster( item ):
                 if line[ 0 ] == '>':
                     num_seqs += 1
 
-                    fixed_header = line.split()[ 0 ].replace( ':', '' ).replace( '(', '' ).replace( ')', '' ).replace( ';', '' ).replace( '|', '' ).replace( "--", '' ).replace( ',', '' ).replace( '*', '' )
+                    fixed_header = line.split()[ 0 ].replace( '(', '' ).replace( ')', '' ).replace( ';', '' ).replace( '|', '' ).replace( "--", '' ).replace( ',', '' ).replace( '*', '' )
                     ofh.write( fixed_header + "\n" )
 
                     if seen_seq:
