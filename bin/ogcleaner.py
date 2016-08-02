@@ -17,7 +17,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import sys, argparse, re, time, os, pickle
 import numpy as np
-from subprocess import call, Popen, PIPE
+from subprocess32 import call, Popen, PIPE, TimeoutExpired
 from pathlib import Path
 from multiprocessing import Pool, Lock
 import pandas as pd
@@ -31,7 +31,7 @@ from sklearn.ensemble import BaggingClassifier
 
 from sklearn.preprocessing import scale
 from sklearn.preprocessing import StandardScaler
-from sklearn.cross_validation import train_test_split
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 
 import matplotlib.pyplot as plt
@@ -123,6 +123,7 @@ p = Path( __file__ )
 base_path = p.resolve().parents[ 1 ]
 max_rand_int = 100000
 default_mafft_path = str( base_path ) + "/lib/mafft_bin/mafft"
+default_mafft_opts = "--anysymbol"
 default_paml_path = str( base_path ) + "/lib/paml_bin/evolverRandomTree"
 default_seqgen_path = str( base_path ) + "/lib/seq-gen_bin/seq-gen"
 default_aliscore_path = str( base_path ) + "/lib/Aliscore_v.2.0/Aliscore.02.2.pl"
@@ -212,12 +213,15 @@ def init_child_train_models( lock_, x_, y_ ):
     y = y_
 
 
-def init_child_featurize( lock_, working_dir_, label_, aliscore_path_ ):
-    global lock, working_dir, label, aliscore_path
+def init_child_featurize( lock_, working_dir_, label_, aliscore_path_, skip_aliscore_, aliscore_timeout_, skip_prev_aliscore_ ):
+    global lock, working_dir, label, aliscore_path, skip_aliscore, aliscore_timeout, skip_prev_aliscore
     lock = lock_
     working_dir = working_dir_
     label = label_
     aliscore_path = aliscore_path_
+    skip_aliscore = skip_aliscore_
+    aliscore_timeout = aliscore_timeout_
+    skip_prev_aliscore = skip_prev_aliscore_
 
 
 def init_child_cluster_seqs( lock_, nh_groups_dir_ ):
@@ -305,6 +309,8 @@ def segregate_orthodb_groups( fasta_file_path, groups_dir, og_field_pos ):
                 cur_seq_header = line.strip()
                 cur_seq_seq = ""
             else:
+                # TODO: possible remove the need for removing ambiguous amino acids because
+                #       mafft allows for any character matching with the option --anysymbol
                 cur_seq_seq += remove_ambiguous_amino_acids( line.strip() )
         cur_group_seqs.append( cur_seq_header + "\n" + cur_seq_seq )
         with open( groups_dir + "/" + cur_group, 'w' ) as out:
@@ -323,7 +329,7 @@ def align_cluster( aligner_path, aligner_opts, cluster_path, cluster_name, align
     align_stderr_file_path = logs_dir + "/" + cluster_name + ".mafft_alignment.stderr.out"
     
     with open( align_out_file_path, 'w' ) as alignment_fh, open( align_stderr_file_path, 'w' ) as stderr_fh:
-        status = call( [ aligner_path, cluster_path ], stdout = alignment_fh, stderr = stderr_fh )
+        status = call( [ aligner_path, aligner_opts, cluster_path ], stdout = alignment_fh, stderr = stderr_fh )
         
         with lock:
             errw( "\t\tAligning " + cluster_path + "..." )
@@ -349,6 +355,10 @@ def align_clusters( aligner_path, aligner_opts, clusters_dir, cluster_names, ali
     tasks = []
     for cluster_name in cluster_names:
         tasks.append( ( aligner_path, aligner_opts, clusters_dir + "/" + cluster_name, cluster_name, aligned_dir, logs_dir ) )
+
+    # randomize the tasks because clusters with lower IDs take longer to align due to how OrthoMCL assigns IDs
+    shuffle( tasks )
+
 
     lock = Lock()
     pool = Pool( threads, initializer = init_child, initargs = ( lock, ) )
@@ -659,7 +669,7 @@ def featurize_cluster( item ):
                 if line[ 0 ] == '>':
                     num_seqs += 1
 
-                    fixed_header = line.split()[ 0 ].replace( '(', '' ).replace( ')', '' ).replace( ';', '' ).replace( '|', '' ).replace( "--", '' ).replace( ',', '' ).replace( '*', '' )
+                    fixed_header = line.split()[ 0 ].replace( ':', '' ).replace( '|', '' ).replace( '(', '' ).replace( ')', '' ).replace( ';', '' ).replace( "--", '' ).replace( ',', '' ).replace( '*', '' )
                     ofh.write( fixed_header + "\n" )
 
                     if seen_seq:
@@ -711,7 +721,7 @@ def featurize_cluster( item ):
             clust_aa_hydrophobic.append( seq_aa_hydrophobic )
 
     # calculate all actual values for the cluster
-    range = max_seq_len - min_seq_len
+    my_range = max_seq_len - min_seq_len
 
     # sanity checking, each of these should have something in them.
     assert len( clust_aa_charged ) > 0
@@ -726,41 +736,91 @@ def featurize_cluster( item ):
 
     # compute aliscore
     # perl Aliscore.02.2.pl -i 80.groupID8701.aln
-    aliscore_pm_path = os.path.dirname( aliscore_path )
+    aliscore = -1
 
-    with open( working_dir + "/" + group + ".aliscore.err", 'w' ) as err_fh, open( working_dir + "/" + group + ".aliscore.out", 'w' ) as out_fh:
-        status = call( [ "perl", "-I", aliscore_pm_path, aliscore_path, "-i", working_dir + "/" + group ], stdout = out_fh, stderr = err_fh )
+    aliscore_outfile_path = working_dir + "/" + group + "_List_random.txt"
+    if skip_aliscore:
+        #errw( "Skipping aliscore and attempting to read from disk..."
+        try:
+            aliscore = get_aliscore_from_file( aliscore_outfile_path )
+        except:
+            with lock:
+                errw( "\t\t\tAliscore file does not exist...\n" )
+    else:
+        if skip_prev_aliscore:
+            try:
+                aliscore = get_aliscore_from_file( aliscore_outfile_path )
+            except:
+                aliscore = run_aliscore( working_dir, group, aliscore_outfile_path )
+                with lock:
+                    errw( "\t\t\tAliscore file does not exist, recomputing " + group + " ... Complete!\n" )
+        else:
+            aliscore = run_aliscore( working_dir, group, aliscore_outfile_path )
 
-    if status != 0:
-        with lock:
-            errw( "\t\t\tAliscore failed :( ! Continuing...\n" )
-
-    # grab the aliscore from the output
-
-    aliscore = 0
-    if status == 0:
-        with open( working_dir + "/" + group + "_List_random.txt", 'r' ) as fh:
-            for line in fh:
-                line = line.strip()
-                if line == '':
-                    continue
-                aliscore += len( line.split() )
+    if aliscore == -1:
+        aliscore = length
 
     # store the featurized instance
     #data_dest[ idx ] = [ aliscore, length, num_seqs, num_gaps, num_aa, range, clust_aa_charged, clust_aa_uncharged, clust_aa_special, clust_aa_hydrophobic, label ]
     #data_dest.put( [ aliscore, length, num_seqs, num_gaps, num_aa, range, clust_aa_charged, clust_aa_uncharged, clust_aa_special, clust_aa_hydrophobic, label ] )
 
+    if label != '?':
+        group = group + "_" + label
+
+    my_data = [ group, aliscore, length, num_seqs, num_gaps, num_aa, my_range, clust_aa_charged, clust_aa_uncharged, clust_aa_special, clust_aa_hydrophobic, label ]
+
     with lock:
         #data_dest.append( [ aliscore, length, num_seqs, num_gaps, num_aa, range, clust_aa_charged, clust_aa_uncharged, clust_aa_special, clust_aa_hydrophobic, label ] )
         errw( "\t\t\tFeaturizing of " + group + " Complete\n" )
+        #print group, my_data
 
-    return [ aliscore, length, num_seqs, num_gaps, num_aa, range, clust_aa_charged, clust_aa_uncharged, clust_aa_special, clust_aa_hydrophobic, label ]
+    return my_data
 
 
-def featurize_clusters( cluster_dir, working_dir, cluster_ids, threads, label, aliscore_path ):
+def get_aliscore_from_file( aliscore_file_path ):
+    aliscore = 0
+    with open( aliscore_file_path, 'r' ) as fh:
+        for line in fh:
+            line = line.strip()
+            if line == '':
+                continue
+            aliscore += len( line.split() )
+    return aliscore
+
+
+def run_aliscore( working_dir, group, aliscore_outfile_path ):
+    aliscore_pm_path = os.path.dirname( aliscore_path )
+    with open( working_dir + "/" + group + ".aliscore.err", 'w' ) as err_fh, open( working_dir + "/" + group + ".aliscore.out", 'w' ) as out_fh:
+        try:
+            status = call( [ "perl", "-I", aliscore_pm_path, aliscore_path, "-i", working_dir + "/" + group ], stdout = out_fh, stderr = err_fh, timeout = aliscore_timeout )
+            if status != 0:
+                with lock:
+                    errw( "\t\t\tAliscore failed :( ! Continuing...\n" )
+
+            # grab the aliscore from the output
+            if status == 0:
+                return get_aliscore_from_file( aliscore_outfile_path )
+            else:
+                #print "ERROR " + str( status )
+                # we don't know why it failed so we'll give it an aliscore of 0
+                # TODO: check why it failed and handle different errors
+                #       only two possible reasons for aliscore to fail:
+                #           1. not enough taxa left!
+                #           2. taxon names of tree and sequence files do not match!\nprocess terminated!
+                return 0
+        except TimeoutExpired:
+            with lock:
+                errw( "\t\t\tAliscore timed out :( ! Continuing...\n" )
+            return -1
+
+
+def featurize_clusters( cluster_dir, working_dir, cluster_ids, threads, label, aliscore_path, skip_aliscore, aliscore_timeout, skip_prev_aliscore ):
     errw( "\t\tFeaturizing " + label + " clusters...\n" )
     tasks = [ ( idx, x, cluster_dir + "/" + x ) for idx, x in enumerate( cluster_ids ) ]
-   
+
+    # randomize the tasks to spread the workload
+    shuffle( tasks )
+
     lock = Lock()
     pool = Pool(
             threads,
@@ -770,6 +830,9 @@ def featurize_clusters( cluster_dir, working_dir, cluster_ids, threads, label, a
                 working_dir,
                 label,
                 aliscore_path,
+                skip_aliscore,
+                aliscore_timeout,
+                skip_prev_aliscore,
                 )
             )
     featurized_clusters = pool.map( featurize_cluster, tasks )
@@ -811,9 +874,11 @@ def train_model( model ):
 def format_data_for_training( data ):
     # prep the data
     ## turn the data into a pandas dataframe with appropriate labels
-    columns = available_features_str.split( ',' )
+    columns = [ 'group' ]
+    columns.extend( available_features_str.split( ',' ) )
     columns.append( "class" )
     data = pd.DataFrame( data, columns = columns )
+    data.set_index( 'group', drop = False, inplace = True )
 
     return data
 
@@ -829,7 +894,7 @@ def create_trained_model( model, features, data, threads ):
 
     # generate the scaled data
     sdata = data.copy()
-    
+
     ss = StandardScaler()
     ss.fit( sdata[ features ] )
     sdata[ features ] = ss.transform( sdata[ features ] )
@@ -849,6 +914,7 @@ def create_trained_model( model, features, data, threads ):
 
     errw( "\t\tTrain size: " + str( len( x_train ) ) + " instances\n" )
     errw( "\t\tTest size: " + str( len( x_test ) ) + " instances\n" )
+
 
     if len( model ) > 1:
         model_class = model_to_class[ "metaclassifier" ]
@@ -1185,6 +1251,9 @@ def generate_trained_model( args ):
                 args.threads,
                 'H',
                 args.aliscore_path,
+                False,
+                args.aliscore_timeout,
+                False,
                 )
 
         if args.clean:
@@ -1197,6 +1266,9 @@ def generate_trained_model( args ):
                 nh_groups, args.threads,
                 "NH",
                 args.aliscore_path,
+                False,
+                args.aliscore_timeout,
+                False,
                 )
 
         if args.clean:
@@ -1293,15 +1365,18 @@ def classify_clusters( args ):
     # check if aligned dir exsists
     dir_check( args.aligned_dir )
 
-    align_clusters(
-            args.aligner_path,
-            "",
-            args.fasta_dir,
-            cluster_names,
-            args.aligned_dir,
-            args.threads,
-            args.logs_dir
-            )
+    if args.skip_align:
+        errw( "\t\tSkipping the alignment step...\n" )
+    else:
+        align_clusters(
+                args.aligner_path,
+                args.aligner_options,
+                args.fasta_dir,
+                cluster_names,
+                args.aligned_dir,
+                args.threads,
+                args.logs_dir
+                )
 
     clean_dir( args.logs_dir )
 
@@ -1313,17 +1388,18 @@ def classify_clusters( args ):
             args.threads,
             '?',
             args.aliscore_path,
+            args.skip_aliscore,
+            args.aliscore_timeout,
+            args.skip_prev_aliscore,
             )
-    #print featurized
     data = format_data_for_training( featurized )
-    #print data
     #data[ 'names' ] = pd.Series( cluster_names, index = data.index )
-    
+
     # classify
     x = data[ available_features ]
     sx = scaler.transform( data[ available_features ] )
 
-    #print x
+
 
     if isinstance( model, Metaclassifier ):
         preds = model.predict( x, sx )
@@ -1335,8 +1411,9 @@ def classify_clusters( args ):
     if args.clean:
         clean_dir( args.logs_dir )
 
-    for name, pred in zip( cluster_names, preds ):
-        print name + "\t" + pred
+    with open( args.results_file, 'w' ) as fh:
+        for name, pred in zip( data[ 'group' ], preds ):
+            fh.write( name + "\t" + pred + "\n" )
 
     errw( "Done!\n" )
 
@@ -1377,7 +1454,7 @@ if __name__ == "__main__":
     classify_group_in.add_argument( "--fasta_dir",
             type = str,
             required = True,
-            help = "A directory containing all the paths to your fasta files. One file per line."
+            help = "A directory containing all your clusters with each sluter in a separate fasta file."
             )
     classify_group_in.add_argument( "--model_prefix",
             type = str,
@@ -1406,6 +1483,22 @@ if __name__ == "__main__":
             action = "store_false",
             help = "Set this flag to delete temporary files as you go."
             )
+    classify_group_opts.add_argument( "--aligner_options",
+            type = str,
+            default = default_mafft_opts,
+            help = "Options for your aligner."
+            )
+    classify_group_opts.add_argument( "--results_file",
+            type = str,
+            default = "results.txt",
+            help = "Cluster classification output file path."
+            )
+    classify_group_opts.add_argument( "--aliscore_timeout",
+            type = int,
+            default = 120,
+            help = "Time (in seconds) to wait for aliscore to finish."
+            )
+
 
     classify_group_dir = sp_classify.add_argument_group( "Directories", "Directories where output will be stored." )
     classify_group_dir.add_argument( "--aligned_dir",
@@ -1428,6 +1521,30 @@ if __name__ == "__main__":
             default = "classify_aliscores",
             help = "Directory to store the aliscore for clusters."
             )
+
+    classify_group_skip = sp_classify.add_argument_group( "Skipping options", "Steps that you can skip if they've already been completed." )
+    classify_group_skip.add_argument( "--skip_align",
+            default = False,
+            action = "store_true",
+            help = "Skip the alignment process. You should use the same aligner and parameters during classification that you used during training."
+            )
+    classify_group_skip.add_argument( "--skip_aliscore",
+            default = False,
+            action = "store_true",
+            help = "Skip the aliscore process because you've already computed the aliscore previously."
+            )
+    classify_group_skip.add_argument( "--skip_prev_aliscore",
+            default = False,
+            action = "store_true",
+            help = "Skip clusters that have already had their aliscore computed. This will attempt to compute the aliscore only for clusters that were not successful. Use the --aliscore_timeout option to give more time to the aliscore algorithm."
+            )
+    # TODO: implement this option
+    classify_group_skip.add_argument( "--skip_featurize",
+            default = False,
+            action = "store_true",
+            help = "Skip the featurizing of clusters and read in from file."
+            )
+
 
     # sub parser train options
     group_in = sp_train.add_argument_group( "Input", "Input files to run the program." )
@@ -1506,7 +1623,7 @@ if __name__ == "__main__":
             )
     train_group_aligner.add_argument( "--aligner_options",
             type = str,
-            default = "",
+            default = default_mafft_opts,
             help = "Options for your aligner."
             )
 
@@ -1535,6 +1652,12 @@ if __name__ == "__main__":
             default = default_aliscore_path,
             help = "Path to the aliscore binary."
             )
+    train_group_aliscore.add_argument( "--aliscore_timeout",
+            type = int,
+            default = 120,
+            help = "Time (in seconds) to wait for aliscore to finish."
+            )
+
 
     train_group_model = sp_train.add_argument_group( "Model training", "Models and features available for training" )
     train_group_model.add_argument( "--model",

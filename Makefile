@@ -30,7 +30,7 @@ lib/paml_bin/evolverRandomTree:
 	cd lib; \
 		tar zxvf paml4.9a.tgz; \
 		cd paml4.9a/src; \
-		cc -lm -o evolverRandomTree -O2 evolver.c tools.c; \
+		cc -o evolverRandomTree -O3 evolver.c tools.c -lm; \
 		mv evolverRandomTree ../bin; \
 		cd ../..; \
 		ln -s paml4.9a/bin paml_bin
