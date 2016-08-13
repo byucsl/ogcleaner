@@ -41,7 +41,6 @@ data/15000.fasta
 
 trained_model.*
 
-scripts/*
 data/test/*
 slurm-*
 working/*
