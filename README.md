@@ -128,6 +128,11 @@ python bin/ogcleaner.py classify --fasta_dir train_orthodb_groups_fasta/ --model
 
 You now have a filtered set of orthology clusters!
 
+### Output files
+
+The results of the filtering will be output into a file called ```results.txt```.
+To use these results in conjunction with OrthoMCL, use ```scripts/filter_orthomcl_output.py``` to filter your OrthoMCL ```groups.txt``` file.
+
 #### Using Pre-Trained Models
 
 A pre-trained model is provided in the repository.
