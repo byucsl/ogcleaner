@@ -49,9 +49,6 @@ It is suggested that you use the included PAML distribution in this package unle
 ## With root permissions
 pip install -r requirements.txt
 
-## Without root permissions
-pip install --user -r requirements.txt
-
 # Install Aliscore
 make aliscore
 
@@ -63,7 +60,14 @@ make paml
 
 # Install Seq-Gen
 make seq-gen
+
+# Install scikit-learn developer branch
+git clone https://github.com/scikit-learn/scikit-learn.git
+cd scikit-learn
+python setup.py install
 ```
+
+**If you don't have root permissions on your system**, you can run ```pip install --user -r requirements.txt``` to install python dependencies and ```python setup.py install --user``` in the scikit-learn directory.
 
 ## Tutorial
 
