@@ -8,6 +8,8 @@ This software package is designed as an all-inclusive source for taking putative
 
 Our methodology is based outlined in [**Detecting false positive sequence homology: a machine learning approach**](http://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-016-0955-3) published in BMC Bioinformatics on 24 February 2016.
 
+This application was published in [**The OGCleaner: filtering false-positive homology clusters**](http://bioinformatics.oxfordjournals.org/content/early/2016/09/07/bioinformatics.btw571.abstract) published in Bioinformatics on 10 September 2016.
+
 ## Required software
 
 1. python 2
@@ -171,18 +173,7 @@ You may save time doing some of the following.
 
 Please use the following to cite us:
 
-```tex
-@article{fujimoto2016detecting,
-  title={Detecting false positive sequence homology: a machine learning approach},
-  author={Fujimoto, M Stanley and Suvorov, Anton and Jensen, Nicholas O and Clement, Mark J and Bybee, Seth M},
-  journal={BMC bioinformatics},
-  volume={17},
-  number={1},
-  pages={1},
-  year={2016},
-  publisher={BioMed Central}
-}
-```
+[**The OGCleaner: filtering false-positive homology clusters**](http://bioinformatics.oxfordjournals.org/content/early/2016/09/07/bioinformatics.btw571.abstract)
 
 ## Acknowledgements
 
