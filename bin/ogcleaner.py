@@ -305,7 +305,7 @@ def segregate_orthodb_groups( fasta_file_path, groups_dir, og_field_pos ):
                                 out.write( "\n" )
                     cur_group_seqs = []
                     cur_group = t_group
-                
+
                 cur_seq_header = line.strip()
                 cur_seq_seq = ""
             else:
@@ -327,10 +327,10 @@ def segregate_orthodb_groups( fasta_file_path, groups_dir, og_field_pos ):
 def align_cluster( aligner_path, aligner_opts, cluster_path, cluster_name, aligned_dir, logs_dir ):
     align_out_file_path = aligned_dir + "/" + cluster_name
     align_stderr_file_path = logs_dir + "/" + cluster_name + ".mafft_alignment.stderr.out"
-    
+
     with open( align_out_file_path, 'w' ) as alignment_fh, open( align_stderr_file_path, 'w' ) as stderr_fh:
         status = call( [ aligner_path, aligner_opts, cluster_path ], stdout = alignment_fh, stderr = stderr_fh )
-        
+
         with lock:
             errw( "\t\tAligning " + cluster_path + "..." )
             if status != 0:
@@ -377,12 +377,12 @@ def generate_paml_configs( outputs_dir ):
     file_paths = []
 
     for i, v in enumerate( s ):
-        paml_config_text = generate_paml_config( str( np.random.randint( max_rand_int ) ), v ) 
+        paml_config_text = generate_paml_config( str( np.random.randint( max_rand_int ) ), v )
         file_path = outputs_dir + "/tree" + str( i )
         with open( file_path, 'w' ) as fh:
             fh.write( paml_config_text )
         file_paths.append( ( str( i ), file_path ) )
-    
+
     errw( " Done!\n" )
     return file_paths
 
@@ -595,9 +595,9 @@ def create_evolved_clusters( evolved_cluster_dir_paths, threads, nh_groups_dir )
     pool.map( create_evolved_cluster, evolved_cluster_dir_paths )
     pool.close()
     pool.join()
-    
+
     errw( "\t\tDone forming clusters!\n" )
-    
+
     return [ x[ 0 ] for x in evolved_cluster_dir_paths ]
 
 
@@ -795,7 +795,7 @@ def run_aliscore( working_dir, group, aliscore_outfile_path ):
             status = call( [ "perl", "-I", aliscore_pm_path, aliscore_path, "-i", working_dir + "/" + group ], stdout = out_fh, stderr = err_fh, timeout = aliscore_timeout )
             if status != 0:
                 with lock:
-                    errw( "\t\t\tAliscore failed :( ! Continuing...\n" )
+                    errw( "\t\t\t" + str( group ) + " Aliscore failed :( ! Continuing...\n" )
 
             # grab the aliscore from the output
             if status == 0:
@@ -810,7 +810,7 @@ def run_aliscore( working_dir, group, aliscore_outfile_path ):
                 return 0
         except TimeoutExpired:
             with lock:
-                errw( "\t\t\tAliscore timed out :( ! Continuing...\n" )
+                errw( "\t\t\t" + str( group ) + " Aliscore timed out :( ! Continuing...\n" )
             return -1
 
 
@@ -958,7 +958,7 @@ def get_correct_preds( model, x_test, sx_test ):
     else:
         preds = model.predict( sx_test )
     return preds
-   
+
 
 def bootstrap( model, model_params = {}, data = None, sdata = None, features = available_features, verbosity = 0 ):
 
@@ -975,9 +975,9 @@ def bootstrap( model, model_params = {}, data = None, sdata = None, features = a
             train, test, strain, stest = train_test_split( data, sdata, test_size = 0.2 )
             x_test = test[ features ]
             sx_test = stest[ features ]
-            
+
             test_labels = test[ "class" ]
-            
+
             sub_train = train.sample( num_instances, replace = True )
             sub_strain = strain.loc[ sub_train.index ]
 
@@ -990,36 +990,36 @@ def bootstrap( model, model_params = {}, data = None, sdata = None, features = a
             try:
                 if isinstance( mod, Metaclassifier ):
                     mod.fit( x_train, sx_train, train_labels )
-                    
+
                     preds = mod.predict( x_train, sx_train )
                     acc_perc_train.append( accuracy_score( preds, train_labels ) )
-                    
+
                     preds = mod.predict( x_test, sx_test )
                     acc_perc_test.append( accuracy_score( preds, test_labels ) )
                 elif isinstance( mod, MultinomialNB ):
                     mod.fit( x_train, train_labels )
-                    
+
                     preds = mod.predict( x_train )
                     acc_perc_train.append( accuracy_score( preds, train_labels ) )
-                    
+
                     preds = mod.predict( x_test )
                     acc_perc_test.append( accuracy_score( preds, test_labels ) )
                 else:
                     mod.fit( sx_train, train_labels )
-            
+
                     preds = mod.predict( sx_train )
                     acc_perc_train.append( accuracy_score( preds, train_labels ) )
-                    
+
                     preds = mod.predict( sx_test )
                     acc_perc_test.append( accuracy_score( preds, test_labels ) )
             except ValueError as e:
                 pass
 
             # train dataset
-            
+
 
             # test dataset
-        
+
         if verbosity > 0:
             errw( "perc:\t" +  str( perc ) + "\t" + str( np.mean( acc_perc_train ) ) + "\t" + str( np.mean( acc_perc_test ) ) + "\t" + str( np.std( acc_perc_train ) ) + str( np.std( acc_perc_test ) ) + "\n" )
         acc_train.append( acc_perc_train )
@@ -1102,7 +1102,7 @@ def load_featurized_data( file_path ):
 
 def save_model( save_dir, save_prefix, model, features, trained_model, scaler ):
     errw( "\tSaving model..." )
-    
+
     with open( save_dir + "/" + save_prefix + ".trained_model", "wb" ) as fh:
         pickle.dump( trained_model, fh )
 
@@ -1162,7 +1162,7 @@ def generate_trained_model( args ):
     if args.test_only:
         args.test = True
     # end verify parameters
-    
+
     if not args.featurized_data:
 
         if not args.orthodb_fasta:
@@ -1179,7 +1179,7 @@ def generate_trained_model( args ):
         dir_check( args.evolved_seqs_dir )
         dir_check( args.featurized_clusters_dir )
         dir_check( args.aliscore_homology_dir )
-        dir_check( args.aliscore_nh_dir )    
+        dir_check( args.aliscore_nh_dir )
 
         if args.seed != -1:
             errw( "Setting random number seed to: " + str( args.seed ) + "\n" )
@@ -1738,7 +1738,7 @@ if __name__ == "__main__":
             default = "tests",
             help = "Directory to store output of running tests."
             )
-    
+
     train_group_clean = sp_train.add_argument_group( "Cleaning", "There are many intermediary files that are generated while running this program, set this flag to clean as you go." )
     train_group_clean.add_argument( "--clean",
             default = True,
