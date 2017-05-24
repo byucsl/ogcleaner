@@ -14,7 +14,6 @@ This application was published in [**The OGCleaner: filtering false-positive hom
 
 1. python 2
 1. [scikit-learn](https://github.com/scikit-learn/scikit-learn)
-    1. This currently requires the development branch (0.18.dev0) of scikit-learn for the neural network. You can install the developer branch by following the instructions [here](https://github.com/scikit-learn/scikit-learn).
 1. [Aliscore](https://www.zfmk.de/en/research/research-centres-and-groups/aliscore)
    1. This program requires perl
 1. [pandas](http://pandas.pydata.org/)
@@ -26,9 +25,8 @@ This application was published in [**The OGCleaner: filtering false-positive hom
 Note: all necessary software packages are included except:
 
 1. python packages
-1. scikit-learn dev branch
 
-The python modules can be installed via pip and the included requirements.txt and from [here](https://github.com/scikit-learn/scikit-learn) for scikit-learn.
+The python modules can be installed via pip and the included requirements.txt.
 We strongly suggest using a [virtualenv](https://virtualenv.pypa.io/en/stable/) as a way to set up an isolated python module environment.
 Follow these steps to install all other software.
 
@@ -62,14 +60,9 @@ make paml
 
 # Install Seq-Gen
 make seq-gen
-
-# Install scikit-learn developer branch
-git clone https://github.com/scikit-learn/scikit-learn.git
-cd scikit-learn
-python setup.py install
 ```
 
-**If you don't have root permissions on your system**, you can run ```pip install --user -r requirements.txt``` to install python dependencies and ```python setup.py install --user``` in the scikit-learn directory.
+**If you don't have root permissions on your system**, you can run ```pip install --user -r requirements.txt``` to install python dependencies.
 
 ## Tutorial
 
