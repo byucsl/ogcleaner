@@ -144,7 +144,7 @@ Running the following will generate the FASTA cluster files and then run the cla
 
 ```bash
 # Generate the FASTA cluster files from OrthoMCL files
-python scripts/gen_clusters_from_good_proteins.py --groups groups.txt --proteins goodProteins.fasta --out fasta_cluster/
+python scripts/gen_clusters_from_good_proteins.py --groups groups.txt --proteins goodProteins.fasta --out_dir fasta_cluster/
 
 # Now run the filtering on these clusters
 python bin/ogcleaner.py classify --fasta_dir fasta_cluster/ --model trained_model/filter --threads 10
