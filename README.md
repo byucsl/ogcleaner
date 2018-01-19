@@ -1,5 +1,9 @@
 # OGCleaner (Orthology Group Cleaner)
 
+## Contact
+
+For direct contact with the authors, please email to sfujimoto@gmail.com.
+
 ## Purpose
 
 This software package is designed as an all-inclusive source for taking putative orthology clusters and filtering them.
